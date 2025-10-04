@@ -3,10 +3,14 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+from dotenv import load_dotenv
 import json
 import time
 from st_mui_table import st_mui_table
 from pathlib import Path
+
+# Load environment variables
+load_dotenv()
 
 # Configure page
 st.set_page_config(
@@ -146,7 +150,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
     """
     try:
         # Initialize Mistral client
-        api_key = st.secrets['MISTRAL_API_KEY']
+        api_key = os.getenv('MISTRAL_API_KEY')
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment variables")
         
@@ -663,9 +667,113 @@ def display_results_table():
         st_mui_table(
             df,
             customCss="""
-                .MuiTablePagination-toolbar > p {
-                    margin: 0 !important;
-                } 
+/* Material 3 Expressive - Water & Biodiversity Theme */
+:root {
+    /* Primary - Deep Ocean */
+    --md-sys-color-primary: #006A6B;
+    --md-sys-color-on-primary: #FFFFFF;
+    --md-sys-color-primary-container: #9CF0F2;
+    --md-sys-color-on-primary-container: #002020;
+    
+    /* Secondary - Wetland Green */
+    --md-sys-color-secondary: #4A6363;
+    --md-sys-color-on-secondary: #FFFFFF;
+    --md-sys-color-secondary-container: #CCE8E8;
+    --md-sys-color-on-secondary-container: #051F1F;
+    
+    /* Tertiary - Fresh Water */
+    --md-sys-color-tertiary: #00838F;
+    --md-sys-color-on-tertiary: #FFFFFF;
+    
+    /* Surface & Background */
+    --md-sys-color-surface: #FAFDFC;
+    --md-sys-color-on-surface: #191C1C;
+    --md-sys-color-surface-variant: #DAE5E4;
+    --md-sys-color-surface-container-low: #F0F4F4;
+    --md-sys-color-surface-container: #E6EBEB;
+    --md-sys-color-surface-container-high: #DFE4E4;
+    
+    /* Outline & Borders */
+    --md-sys-color-outline: #6F7979;
+    --md-sys-color-outline-variant: #BEC8C8;
+    
+    /* Biodiversity Accent Colors */
+    --bio-green: #2E7D32;
+    --bio-blue: #0277BD;
+    --bio-teal: #00695C;
+    
+    /* Elevation & Shadow */
+    --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 106, 107, 0.06);
+    --elevation-2: 0 3px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 106, 107, 0.08);
+    --elevation-3: 0 6px 12px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 106, 107, 0.1);
+    --elevation-4: 0 12px 24px rgba(0, 0, 0, 0.14), 0 8px 16px rgba(0, 106, 107, 0.12);
+    
+    /* Expressive Radii */
+    --radius-small: 12px;
+    --radius-medium: 20px;
+    --radius-large: 28px;
+    --radius-extra-large: 36px;
+    
+    /* Transitions */
+    --transition-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+    --transition-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1);
+    --transition-accelerate: cubic-bezier(0.4, 0.0, 1, 1);
+}
+
+/* Table styling - M3 Expressive */
+.MuiTableContainer-root {
+    border-radius: var(--radius-large) !important;
+    box-shadow: var(--elevation-2) !important;
+    background: var(--md-sys-color-surface) !important;
+    overflow: hidden !important;
+}
+
+.MuiTableHead-root {
+    background: linear-gradient(135deg, var(--md-sys-color-primary-container) 0%, var(--md-sys-color-secondary-container) 100%) !important;
+}
+
+.MuiTableHead-root th {
+    color: var(--md-sys-color-on-primary-container) !important;
+    font-weight: 600 !important;
+    font-size: 0.9375rem !important;
+    letter-spacing: 0.5px !important;
+    padding: 1.25rem 1rem !important;
+}
+
+.MuiTableBody-root tr {
+    transition: all 0.2s var(--transition-standard) !important;
+}
+
+.MuiTableBody-root tr:hover {
+    background: var(--md-sys-color-surface-container-low) !important;
+    transform: translateX(2px) !important;
+}
+
+.MuiTableCell-root {
+    border-bottom: 1px solid var(--md-sys-color-outline-variant) !important;
+    padding: 1rem !important;
+}
+
+.MuiTablePagination-root {
+    border-top: 2px solid var(--md-sys-color-primary-container) !important;
+}
+
+.MuiTablePagination-toolbar > p {
+    margin: 0 !important;
+    font-weight: 500 !important;
+    color: var(--md-sys-color-on-surface) !important;
+}
+
+.MuiIconButton-root {
+    color: var(--md-sys-color-primary) !important;
+    transition: all 0.2s var(--transition-standard) !important;
+}
+
+.MuiIconButton-root:hover {
+    background: var(--md-sys-color-primary-container) !important;
+    transform: scale(1.1) !important;
+}
+
 
                 td.MuiTableCell-sizeSmall:first-child {
                     display: none;
@@ -674,6 +782,8 @@ def display_results_table():
                 .expanded-content .field-group {
                     padding: 1rem 0;
                 }
+
+
             """,
             detailColumns=["Détails"],
             detailColNum=1,
