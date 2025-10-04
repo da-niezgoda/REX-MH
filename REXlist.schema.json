@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schéma d'extraction de projets",
+  "description": "Schéma pour extraire la liste des projets d'un document",
+  "type": "object",
+  "properties": {
+    "Liste": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "Titre": {
+            "type": "string",
+            "description": "Le titre du projet"
+          },
+          "PageDebut": {
+            "type": "integer",
+            "description": "La première page traitant du projet",
+            "minimum": 0
+          },
+          "PageFin": {
+            "type": "integer",
+            "description": "La dernière page traitant du projet",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "Titre",
+          "PageDebut",
+          "PageFin"
+        ],
+        "additionnalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "Liste"
+  ],
+  "additionnalProperties": false
+}

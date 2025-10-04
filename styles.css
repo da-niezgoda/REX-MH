@@ -1,0 +1,185 @@
+/* Material You Color Palette */
+:root {
+    --md-sys-color-primary: #006A6B;
+    --md-sys-color-on-primary: #FFFFFF;
+    --md-sys-color-primary-container: #9CF0F2;
+    --md-sys-color-on-primary-container: #002020;
+    --md-sys-color-secondary: #4A6363;
+    --md-sys-color-on-secondary: #FFFFFF;
+    --md-sys-color-secondary-container: #CCE8E8;
+    --md-sys-color-on-secondary-container: #051F1F;
+    --md-sys-color-surface: #FAFDFC;
+    --md-sys-color-on-surface: #191C1C;
+    --md-sys-color-surface-variant: #DAE5E4;
+    --md-sys-color-outline: #6F7979;
+}
+
+/* Main container styling */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 100%;
+}
+
+/* Header styling */
+.main-header {
+    background: linear-gradient(135deg, var(--md-sys-color-primary), var(--md-sys-color-secondary));
+    color: var(--md-sys-color-on-primary);
+    padding: 2rem;
+    border-radius: 16px;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 12px rgba(0, 106, 107, 0.15);
+}
+
+.main-header h1 {
+    color: var(--md-sys-color-on-primary) !important;
+    margin-bottom: 0.5rem;
+}
+
+.main-header h3 {
+    color: var(--md-sys-color-on-primary) !important;
+    font-weight: 300;
+    margin: 0;
+}
+/* Dashboard container */
+.dashboard-container {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+}
+
+/* Dashboard cards */
+.dashboard-card {
+    background: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: 16px;
+    padding: 1.5rem;
+    flex: 1;
+    min-width: 200px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.dashboard-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    transform: translateY(-2px);
+}
+
+.metric-value {
+    font-size: 2.5rem;
+    font-weight: 600;
+    color: var(--md-sys-color-primary);
+    margin: 0;
+}
+
+.metric-label {
+    font-size: 1rem;
+    color: var(--md-sys-color-on-surface);
+    margin: 0.5rem 0 0 0;
+}
+
+/* File upload styling */
+.upload-container {
+    background: var(--md-sys-color-primary-container);
+    border-radius: 16px;
+    padding: 2rem;
+    margin: 2rem 0;
+    border: 2px dashed var(--md-sys-color-primary);
+    text-align: center;
+}
+
+.stFileUploader > div {
+    border: none !important;
+    background: transparent !important;
+}
+
+/* Success/Error messages */
+.success-message {
+    background: #E8F5E8;
+    color: #2E7D2E;
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 4px solid #4CAF50;
+    margin: 1rem 0;
+}
+
+.error-message {
+    background: #FFF3E0;
+    color: #E65100;
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 4px solid #FF9800;
+    margin: 1rem 0;
+}
+
+/* Buttons */
+.stButton > button {
+    background: var(--md-sys-color-primary) !important;
+    color: var(--md-sys-color-on-primary) !important;
+    border: none !important;
+    border-radius: 24px !important;
+    padding: 0.75rem 2rem !important;
+    font-weight: 500 !important;
+    transition: all 0.3s ease !important;
+}
+
+.stButton > button:hover {
+    background: var(--md-sys-color-secondary) !important;
+    box-shadow: 0 4px 12px rgba(0, 106, 107, 0.3) !important;
+}
+
+/* Spinner styling */
+.stSpinner > div {
+    border-color: var(--md-sys-color-primary) transparent var(--md-sys-color-primary) transparent !important;
+}
+
+/* Expanded row styling */
+.expanded-content {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border-left: 4px solid var(--md-sys-color-primary);
+}
+
+.field-group {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border: 1px solid #e0e0e0;
+}
+
+.field-group h4 {
+    color: var(--md-sys-color-primary);
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.field-item {
+    margin: 0.3rem 0;
+    padding: 0.2rem 0;
+}
+
+.field-label {
+    font-weight: 600;
+    color: #333;
+}
+
+.field-value {
+    color: #666;
+    margin-left: 0.5rem;
+}
+
+.st-key-filterEnter button,
+.st-key-filterClear button {
+    margin-top: 1.75rem !important;
+}
+
+.stMarkdown h3 {
+    padding: 2rem 0 1rem;
+    border-bottom: 1px solid var(--md-sys-color-primary);
+    margin: 0 0 1rem;
+}

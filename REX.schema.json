@@ -1,0 +1,585 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schéma d'extraction d'informations de projet",
+  "description": "Schéma pour extraire les informations d'un document de projet",
+  "type": "object",
+  "properties": {
+		"Presentation": {
+			"type": "object",
+			"properties": {
+			  "Titre": {
+			    "type": "string",
+			    "description": "Titre du projet",
+			    "examples": [
+						"Etangs de la ligne Maginot aquatique (région de Puttelange-aux-lacs)",
+						"Ouverture au public du Marais de Cambrin",
+						"Démantèlement du barrage de Blois"
+			    ]
+			  },
+			  "Bassin": {
+			    "type": "string",
+			    "description": "Bassin versant",
+			    "examples": [
+						"Rhin-Meuse",
+						"Artois-Picardie",
+						"Loire-Bretagne"
+			    ]
+			  },
+			  "Nom de l'organisme": {
+			    "type": "string",
+			    "description": "Nom de l'organisme mettant en œuvre le projet",
+			    "examples": [
+						"Syndicat Intercommunal de Mise en Valeur des Etangs de la Région de Puttelange-aux-lacs (SIMVER)",
+						"Conservatoire des sites naturels du Nord et du Pas-de-Calais",
+						"Conseil général de Loir-et-Cher"
+			    ]
+			  },
+			  "Localisation": {
+			    "type": "string",
+			    "description": "Pays, bassin, point GPS",
+			    "examples": [
+						"Grand Est",
+						"HAUTS-DE-FRANCE",
+						"CENTRE-VAL DE LOIRE"
+			    ]
+			  },
+			  "Adresse précise": {
+			    "type": "string",
+			    "description": "Adresse précise du projet",
+			    "examples": [
+						"Puttelange-aux-lacs",
+						"Cambrin",
+						"Communes de Vineuil et La Chaussée-Saint-Victor"
+			    ]
+			  },
+			  "Région": {
+			    "type": "string",
+			    "description": "Région",
+			    "enum": [
+						"AUVERGNE-RHONE-ALPES",
+						"BOURGOGNE-FRANCHE-COMTE",
+						"BRETAGNE",
+						"CENTRE-VAL DE LOIRE",
+						"CORSE",
+						"GRAND EST",
+						"GUADELOUPE",
+						"GUYANE",
+						"HAUTS-DE-FRANCE",
+						"ILE-DE-FRANCE",
+						"LA REUNION",
+						"MARTINIQUE",
+						"MAYOTTE",
+						"NORMANDIE",
+						"NOUVELLE-AQUITAINE",
+						"OCCITANIE",
+						"PAYS DE LA LOIRE",
+						"POLYNESIE FRANCAISE",
+						"PROVENCE-ALPES-COTE D'AZUR",
+						"SAINT BARTHELEMY",
+						"SAINT MARTIN",
+						"SAINT PIERRE ET MIQUELON",
+						"WALLIS ET FUTUNA"
+			    ],
+			    "examples": [
+						"GRAND EST",
+						"HAUTS-DE-FRANCE",
+						"CENTRE-VAL DE LOIRE"
+			    ]
+			  }
+			},
+			"required": [
+			  "Titre",
+			  "Bassin",
+			  "Nom de l'organisme",
+			  "Localisation",
+			  "Adresse précise",
+			  "Région"
+			],
+			"additionalProperties": false
+		},
+	
+	  "Typologie": {
+          "description": "Schéma pour les champs de typologie en ingénierie écologique",
+          "type": "object",
+          "properties": {
+            "type_ingenierie_ecologique": {
+              "description": "Type d'approche mise en oeuvre",
+              "type": "string",
+              "enum": [
+                "Amélioration des voies navigables",
+                "Connaissance et suivis",
+                "Création de milieux",
+                "Éradication",
+                "Gouvernance",
+                "Ouverture au public",
+                "Préservation et gestion",
+                "Réaffectation",
+                "Restauration et réhabilitation",
+                "Translocation et réintroduction",
+                ""
+              ]
+            },
+            "type_milieu_ramsar": {
+              "description": "Selon la définition des sites RAMSAR inscrite dans la convention RAMSAR relative aux zones humides d'importance internationale de février 1971",
+              "type": "string",
+              "enum": [
+                "1 - Étangs daquaculture",
+                "2 - Étangs",
+                "3 - Terres irriguées",
+                "4 - Terres agricoles inondées de manière saisonnière",
+                "5 - Sites dexploitation du sel",
+                "6 - Zones de stockage de leau",
+                "7 - Excavations",
+                "8 - Sites de traitement des eaux usées",
+                "9 - Canaux et fossés de drainage, rigoles",
+                "A - Eaux marines peu profondes et permanentes",
+                "B - Lits marins aquatiques subtidaux",
+                "C - Récifs coralliens",
+                "D - Rivages marins rocheux",
+                "E - Rivages de sable fin, grossier ou de galets",
+                "F - Eaux destuaires",
+                "G - Vasières, bancs de sable ou de terre salée intertidaux",
+                "H - Marais intertidaux",
+                "I - Zones humides boisées intertidales",
+                "J - Lagunes côtières saumâtres/salées",
+                "K - Lagunes côtières deau douce",
+                "L - Deltas intérieurs permanents",
+                "M - Rivières/cours deau/ruisseaux permanents",
+                "N - Rivières/cours deau/ruisseaux saisonniers/intermittents/irréguliers",
+                "O - Lacs deau douce permanents",
+                "P - Lacs deau douce saisonniers/intermittents",
+                "Q - Lacs salés/saumâtres/alcalins permanents",
+                "R - Lacs salés et étendues/saumâtres/alcalins saisonniers/intermittents",
+                "Sp - Mares/marais salins/saumâtres/alcalins permanents",
+                "Ss - Mares/marais salins/saumâtres/alcalins saisonniers/intermittents",
+                "Tp - Mares/marais deau douce permanents",
+                "Ts - Mares/marais deau douce saisonniers/intermittents sur sols inorganiques",
+                "U - Tourbières non boisées",
+                "Va - Zones humides alpines",
+                "Vt - Zones humides de toundra",
+                "W - Zones humides dominées par des buissons",
+                "Xf - Zones humides deau douce dominées par des arbres",
+                "Xp - Tourbières boisées",
+                "Y - Sources deau douce; oasis",
+                "Zg - Zones humides géothermiques",
+                "Zk(a) - Systèmes karstiques et autres systèmes hydrologiques souterrains, marins/côtiers",
+                "Zk(b) - Systèmes karstiques et autres systèmes hydrologiques souterrains, continentaux",
+                "Zk(c) - Systèmes karstiques et autres systèmes hydrologiques souterrains, artificiels",
+                ""
+              ]
+            },
+            "type_milieu_sdage": {
+              "description": "Selon la définition des SDAGE, au niveau des Agences de l'Eau",
+              "type": "string",
+              "enum": [
+                "Cours d'eau",
+                "Canal",
+                "Cours d'eau de plaine",
+                "Cours d'eau de tête de bassin",
+                "Cours d'eau de zone intermédiaire",
+                "Zones humides",
+                "Baies et estuaires moyens et plats",
+                "Bordures de cours d'eau et plaine alluviale",
+                "Bordures de plans deau",
+                "Grands estuaires",
+                "Marais aménagés dans un but agricole",
+                "Marais et lagunes côtiers",
+                "Marais et landes humides de plaines et plateaux",
+                "Marais saumâtres aménagés",
+                "Plaines alluviales",
+                "Régions détangs",
+                "Zones humides artificielles",
+                "Zones humides de bas-fonds en tête de bassin (Ou zones humides de montagne, colline)",
+                "Zones humides ponctuelles",
+                ""
+              ]
+            },
+            "type_hydrogeomorphologique": {
+              "description": "Selon la typologie hydrogeomorphologique du Sandre (classification est utilisée dans le cadre de l'utilisation de la méthode nationale d'évaluation des fonctions des zones humides Version 1 - 2016, dans le cadre de l'élaboration d'étude d'incidence et d'étude d'impact)",
+              "type": "string",
+              "enum": [
+                "Alluvial",
+                "Riverain des étendues d'eau",
+                "Dépression",
+                "Plateau",
+                "Source et suintement",
+                "Estuarien",
+                "Péri-lagunaire",
+                "Panne dunaire",
+                "Côtier",
+                "Mixte",
+                ""
+              ]
+            },
+            "type_genie_ecologique": {
+              "description": "Techniques employées dans cette action d'ingénierie écologique",
+              "type": "string",
+              "enum": [
+                "Aménagement de dispositif pour abreuver",
+                "Amendement",
+                "Apport de sol",
+                "Arrêt ou régulation du pompage",
+                "Brulis et écobuage",
+                "Comblement",
+                "Coupe à blanc, défrichement et autres",
+                "Creusement, reconnexion d'annexes hydrauliques",
+                "Culture extensive",
+                "Curage",
+                "Déblaiement",
+                "Débroussaillage",
+                "Décompactage ou sous-solage",
+                "Dépoldérisation",
+                "Désalinisation par irrigation",
+                "Désartificialisation du sol",
+                "Dispositif anti batillage",
+                "Effacement de plan d'eau",
+                "Effacement de protection de berge",
+                "Élimination du couvert herbacé",
+                "Etrépage ou décapage",
+                "Faucardage",
+                "Fauche",
+                "Fenaison et pâture",
+                "Gestion des niveaux d'eau",
+                "Gestion en futaie",
+                "Gestion en taillis",
+                "Intervention sur contrainte aux écoulements",
+                "Intervention sur drain souterrain",
+                "Intervention sur ravines",
+                "Intervention sur rigole et fossé",
+                "Inversion de sol",
+                "Irrigation",
+                "Libre évolution",
+                "Mise en défens",
+                "Mise en jachère",
+                "Non intervention",
+                "Ouverture d'habitat forestier",
+                "Paillage et autre couverture du sol",
+                "Pâturage",
+                "Plantation d'arbustes et d'arbres",
+                "Plantation d'espèces non ligneuses",
+                "Préparation du sol",
+                "Protection de berge",
+                "Remodelage et régalage",
+                "Réouverture dembouchure",
+                "Roulage sur fougères",
+                "Salinisation",
+                "Taille de haies, arbustes et arbres",
+                "Talutage et andains hydrauliques",
+                "Traitement par herbicides",
+                "Création de zone humide",
+                ""
+              ]
+            },
+            "type_genie_ecologique_autre": {
+              "description": "Autres types de génie écologique non listés",
+              "type": "string",
+              "examples": [
+                "Aménagement pour l'accueil du public",
+                "Supression de barrage",
+                ""
+              ]
+            }
+          },
+          "required": [
+            "type_ingenierie_ecologique",
+            "type_milieu_ramsar",
+            "type_milieu_sdage",
+            "type_hydrogeomorphologique",
+            "type_genie_ecologique",
+            "type_genie_ecologique_autre"
+          ],
+          "additionalProperties": false
+	  },
+	  
+	  "Enjeux": {
+         "description": "Schema pour l'extraction des enjeux liés à l'eau, la biodiversité et le climat",
+          "type": "object",
+          "properties": {
+            "date_debut": {
+              "type": "string",
+              "pattern": "^(\\d{2}/\\d{2}/\\d{4}|\\d{2}/\\d{4}|)$",
+              "description": "Format DD/MM/YYYY, MM/YYYY ou vide",
+              "examples": ["01/10/2004", "01/01/2006", "07/2006", ""]
+            },
+            "date_fin": {
+              "type": "string",
+              "pattern": "^(\\d{2}/\\d{2}/\\d{4}|\\d{2}/\\d{4}|)$",
+              "description": "Format DD/MM/YYYY, MM/YYYY ou vide",
+              "examples": ["01/06/2006", "01/01/2008", "07/2006", ""]
+            },
+            "enjeux": {
+              "type": "array",
+              "description": "Aspects sur lesquels le projet est susceptible d'avoir une influence positive (Bilan carbone, Biodiversité, Bon état des habitats, Conservation d'espèces patrimoniales, continuité écologique, contrôle des espèces invasives, élévation du niveau de la mer, fonctionnalité du cours d'eau, hydromorphologie, milieux humides, qualité de l'eau, réduction des étiages, réduction des risques d'innondations, ressource en eau (quantité), restauration de frayères)",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Bilan carbone",
+                  "Biodiversité",
+                  "Bon état des habitats",
+                  "Conservation despèces patrimoniales",
+                  "Continuité écologique",
+                  "Contrôle des espèces invasives",
+                  "Elévation du niveau de la mer",
+                  "Fonctionnalité du cours deau",
+                  "Hydromorphologie",
+                  "Milieux humides",
+                  "Qualité de leau",
+                  "Réduction des étiages",
+                  "Réduction des risques dinondation",
+                  "Ressource en eau (quantité)",
+                  "Restauration de frayères"
+                ]
+              },
+              "examples": [
+                ["Biodiversité", "Bon état des habitats", "Conservation d'espèces patrimoniales", "Continuité écologique", "Hydromorphologie", "Milieux humides"],
+                ["Bilan carbone", "Hydromorphologie", "Restauration de frayères"],
+                ["Contrôle des espèces invasives", "Qualité de leau", "Réduction des risques dinondation", "Continuité écologique"]
+              ]
+            }
+          },
+          "required": ["date_debut", "date_fin", "enjeux"],
+          "additionalProperties": false	  
+	  },
+
+  	  "Directives": {
+  	      "description": "Schema pour l'extraction des références aux directives européennes (DCE, Natura 2000, etc.)",
+          "type": "object",
+          "properties": {
+            "milieux_masse_eau_dce": {
+              "type": "string",
+              "description": "Ce(s) milieu(x) est (sont) une (des) masse(s) d'eau au titre de la DCE ? Selon la Directive Cadre sur l'Eau de l'Union Europénne",
+              "enum": ["N/A", "Oui", "Non", ""]
+            },
+            "reference_masse_eau": {
+              "type": "string",
+              "description": "Référence de la Masse d'eau - Selon la Directive Cadre sur l'Eau de l'Union Europénne"
+            },
+            "milieu_rattache_masse_eau": {
+              "type": "string",
+              "description": "Ce milieu est rattaché à une ou plusieurs masse(s) d'eau ? Selon la Directive Cadre sur l'Eau de l'Union Europénne",
+              "enum": ["N/A", "Oui", "Non", ""]
+            },
+            "reference_masse_eau_attachee": {
+              "type": "string",
+              "description": "Référence de la masse d'eau attachée - Selon la Directive Cadre sur l'Eau de l'Union Europénne"
+            },
+            "milieux_perimetre_directive_oiseaux_habitats": {
+              "type": "string",
+              "description": "Ce(s) milieu(x) est (sont) dans le(s) périmètre(s) d’un (de) site(s) au titre de la Directive Oiseaux et Habitats ? Selon la Directive Oiseaux et Habitats de l'Union Europénne",
+              "enum": ["N/A", "Oui", "Non", ""]
+            },
+            "reference_site_natura_2000": {
+              "type": "string",
+              "description": " Référence du site Natura 2000 - Selon le référencement des site Natura 2000",
+              "examples": ["", "FR9300082", "FR2400565"]
+            }
+          },
+          "required": [
+            "milieux_masse_eau_dce",
+            "reference_masse_eau",
+            "milieu_rattache_masse_eau",
+            "reference_masse_eau_attachee",
+            "milieux_perimetre_directive_oiseaux_habitats",
+            "reference_site_natura_2000"
+          ],
+          "additionalProperties": false
+  	  },
+	  
+	  "Travaux": {
+          "description": "Schema pour l'extraction des informations sur la période et l'envergure des travaux",
+          "type": "object",
+          "properties": {
+            "surface_travaux": {
+              "type": "string",
+              "description": "Surface des Travaux",
+              "examples": ["", "21", "327 m de linéaire (largeur de l'ouvrage) => contenu non valide"]
+            }
+          },
+          "required": ["surface_travaux"],
+          "additionalProperties": false
+	  },
+	  
+	  "Contexte": {
+          "description": "Schema pour l'extraction du contexte réglementaire et des espaces protégés",
+          "type": "object",
+          "properties": {
+            "contexte": {
+              "type": "string",
+              "description": "Espace(s) protégé(s) où se trouve le projet le cas échéant",
+              "enum": [
+                "Parc National",
+                "Parc Naturel Régional",
+                "Réserve Biologique Domaniale",
+                "Réserve Biologique Forestière",
+                "Réserve Naturelle Nationale",
+                "Réserve Naturelle Régionale",
+                "Réserve Naturelle de Corse",
+                "Réserve Nationale de Chasse et de Faune Sauvage",
+                "Réserve de Chasse (ACCA)",
+                "Réserve de Pêche",
+                "Arrêté Préfectoral de Biotope",
+                "Espace Naturel Sensible",
+                "Site du CELRL",
+                "Forêts de Protection",
+                "Site inscrit",
+                "Site classé",
+                ""
+              ],
+              "examples": ["", "Réserve Naturelle Régionale"]
+            },
+            "autres": {
+              "type": "string",
+              "description": "Autres types d'espace(s) protégé(s) éventuel (PPRN, DTA, ZN des PLU, espaces boisés classés, cours d'eau classés, ZHIEP, ZSGE, ...)",
+              "examples": ["", "inscrit dans les inventaires nationaux ZNIEFF"]
+            }
+          },
+          "required": ["contexte", "autres"],
+          "additionalProperties": false
+	  },
+  	  
+  	  "Objectif": {
+          "type": "object",
+          "description": "Objectif(s) du maître d'ouvrage",
+          "properties": {
+            "objectifs": {
+              "type": "string",
+              "title": "Objectif(s)",
+              "description": "à rédiger",
+              "examples": [
+                "Renaturer un ensemble de 6 étangs, dans le cadre de la révision de leurs ouvrages hydrauliques, de façon à développer un fonctionnement écologique autonome et durable du milieu, favorable aux usages et à la biodiversité.",
+                "Réhabiliter et aménager le marais de Cambrin pour préserver sa richesse patrimoniale et permettre un accueil du public.",
+                "Supprimer le barrage pour rendre au fleuve sa liberté"
+              ]
+            }
+          },
+          "required": ["objectifs"],
+          "additionalProperties": false
+  	  },
+	  
+	  "Description": {
+          "description": "Description et retour d'experience (REX)",
+          "properties": {
+            "resume": {
+              "type": "string",
+              "description": "Résumé à trouver/extraire si déjà existant, à rédiger sinon",
+              "examples": [
+                "La région de Puttelange-aux-lacs compte de nombreux étangs stratégiques devenus des zones de tourisme et de loisirs, et aux fonctions hydrauliques et hydrologiques importantes. Ces étangs constituent un réservoir de biodiversité et possèdent un fort potentiel daccueil de milieux et despèces rares et protégées. Cependant, ces étangs présentent des dysfonctionnements et sont en partie dégradés par les usages. Ils subissaient depuis quelques années un dysfonctionnement écologique qui se traduisait par une disparition des herbiers aquatiques et une diminution importante de la transparence de leau, ce qui induisait des nuisances fortes pour les usagers (pêcheurs, ). Par ailleurs, la qualité des eaux en aval savérait assez médiocre, en raison des problèmes deutrophisation notamment. De même, lenvasement des cornées, latterrissement des roselières, lérosion des berges due au batillage constituaient autant de problèmes auxquels il était nécessaire de remédier.\nLes objectifs du projet concernant les étangs de la ligne Maginot aquatique sont multiples : restauration du fonctionnement écologique, amélioration de la biodiversité.\nEn raison dobligations réglementaires, des travaux de mise en conformité de digues ont été réalisés sur ces étangs. Ces travaux ont nécessité une vidange et une période dassec pour chaque ouvrage. Les collectivités ont souhaité profiter de ces assecs pour réfléchir à la réalisation de travaux nécessaires à lamélioration du fonctionnement écologique de ces étangs. Une étude a été réalisée, qui a permis délaborer de façon précise un bilan initial de létat écologique de chaque site et des possibilités damélioration de lexistant.\nSuite à cette étude, les travaux de restauration ont été réalisés sur lensemble des six étangs. Lobjectif de ces travaux reposait sur le principe dune restauration et dune diversification physique des étangs de manière à reconstituer de nombreux habitats favorables à la biodiversité dune part, et permettant dassurer efficacement différentes fonctions hydrologiques.\nDiversification de la morphologie des fonds et des habitats :\n Création de mares\n Création de chenaux\n Création de frayères\n Création dîles et de hauts fonds\nTravaux sur les berges :\n Engraissement (élargissement des berges)\n Protection contre le batillage (érosion de la berge)\nSuite aux travaux la qualité de leau sest améliorée du fait des assecs prolongés des étangs et un certain nombre dherbiers aquatiques soient réapparus. D'autre part, ces assecs ont permis l'apparition sur les zones exondées, d'espèces végétales très intéressantes. Suite à ces travaux, la mise en place dune gestion écologique et pérenne des étangs, complémentaire des aménagements réalisés et comprenant des assecs partiels et/ou totaux, est également prévue.",
+                "Le projet visait à réhabiliter et aménager le marais de Cambrin pour préserver sa richesse patrimoniale et permettre un accueil du public (y compris aux personnes à mobilité réduite) dans le respect des milieux naturels.\nAfin de mettre en oeuvre ce projet, la commune de Cambrin décide en 2002 de ne pas renouveler le bail de chasse et de confier la gestion au Conservatoire des sites naturels du Nord et du Pas-de-Calais. Une convention de gestion a été signée en février 2002 entre les deux parties et un plan de gestion a été réalisé afin de mettre en évidence des enjeux patrimoniaux importants. Louverture au public dune partie du marais sous forme de sentier pédagogique apparaît comme un moyen de sensibiliser à la richesse écologique de cette zone humide et de favoriser lappropriation par la population locale et régionale de ce projet.\nUn sentier de 1,6 km a été créé au sein du marais de Cambrin. Ce sentier respecte la richesse écologique du site et permet aussi de canaliser la fréquentation. Les personnes néprouvent pas le besoin de sortir du sentier. Cet aménagement est constitué des éléments suivants : aire daccueil et de stationnement, sentier piétonnier en matériau minéral stabilisé, sentier en platelage bois, observatoire en bois, plateforme dobservation, bancs, supports pour bornes de guidage, tables de lecture et tables pour plan en relief, signalétique adaptée et inclusive.\nAu cours de lannée 2009, le marais de Cambrin a été classé en réserve naturelle régionale par la Région Nord-Pas-de-Calais à qui la compétence de classement a été confiée depuis 2007. Ce nouveau statut attribue un nouvel outil au marais afin den préserver le patrimoine naturel remarquable. Il sagit là dune réelle reconnaissance de la richesse écologique et des efforts développés par les partenaires pour sa protection. Autre perspective, lextension de la réserve. Le Conservatoire des sites naturels a dores et déjà procédé au rachat de treize hectares supplémentaires. Par ailleurs, des liens ont été établis avec lAssociation des naturalistes de la Gohelle qui assure des suivis ornithologiques, lanimation de sorties guidées et participe à des chantiers nature.",
+                "Situé à cheval sur les communes de La Chaussée-Saint-Victor, en rive droite, et de Vineuil en rive gauche, le barrage de Blois a été mis en service en 1970 avec pour vocation de créer un plan deau de loisirs (environ 200 hectares) à lamont.\nCet obstacle avait été identifié comme lun des points stratégiques à traiter en priorité dans le cadre du plan Loire grandeur nature (plan de gestion des poissons migrateurs 2003-2007). Louvrage qui souffrait dun défaut dentretien était de plus vétuste, très coûteux et non rentable. Le collectif «lavenir du fleuve se construit sans barrage » sétait mobilisé pour la déconstruction du barrage. Cette déconstruction envisagée dès 2005, avait trois objectifs :\n- rendre à la Loire sa vocation de fleuve libre ;\n- rétablir les conditions découlement optimal ;\n- restaurer la continuité écologique pour le retour des poissons grands migrateurs.\nFin novembre 2009, le barrage était entièrement démantelé. Le plan deau dit du Lac de Loire nest quant à lui plus fonctionnel depuis 2005. À ce jour le projet de passerelle cycliste a été mis entre parenthèses."
+              ]
+            },
+            "publication_recueil": {
+              "type": "string",
+              "description": "Année de publication du recueil",
+              "pattern": "^[0-9]{4}$",
+              "examples": [
+                "2006",
+                "2010",
+                "2013"
+              ]
+            }
+          },
+          "required": ["resume", "publication_recueil"],
+          "additionalProperties": false
+	  },
+	  
+	  "Valorisation": {
+          "type": "object",
+          "description": "Valorisation de l'opération",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "lien URL vers le recueil ou la fiche le cas échéant (peut être vide)",
+              "anyOf": [
+                {"type": "string", "format": "uri"},
+                {"type": "string", "maxLength": 0}
+              ],
+              "examples": [
+                "",
+                "https://side.developpement-durable.gouv.fr/Default/doc/SYRACUSE/345804/plan-d-action-zones-humides-comment-les-preserver-comment-les-restaurer-actions-menees-sur-le-bassin",
+                "https://www.eau-artois-picardie.fr/sites/default/files/recueil_doperations_en_zones_humides.pdf",
+                "https://centrederessources-loirenature.com/sites/default/files/ged/Receuil_BD_complet.pdf"
+              ]
+            },
+            "texte_lien": {
+              "type": "string",
+              "description": "Texte du lien",
+              "examples": [""]
+            },
+            "type_valorisation": {
+              "type": "string",
+              "description": "Type de valorisation",
+              "enum": [
+                "Médias",
+                "Sentiers pédagogiques",
+                "Document de communications",
+                "Prix ou récompense",
+                "Site Ramsar",
+                ""
+              ],
+              "examples": [
+                "Document de communications"
+              ]
+            },
+            "prix_recompense": {
+              "type": "string",
+              "description": "Prix ou récompense",
+              "examples": [""]
+            }
+          },
+          "required": ["url", "texte_lien", "type_valorisation", "prix_recompense"],
+          "additionalProperties": false
+	  },
+	  
+	  "Documents": {
+          "type": "object",
+          "description": "Informations du document du projet",
+          "properties": {
+            "pages_extraire": {
+              "type": "string",
+              "description": "Pages à extraire : première et dernière pages du recueil traitant du projet",
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]+-[0-9]+$"},
+                {"type": "string", "maxLength": 0}
+              ],
+              "examples": [
+                "",
+                "67-75",
+                "72-74",
+                "134-135"
+              ]
+            },
+            "recueil_complet": {
+              "type": "string",
+              "description": "Recueil complet : lien vers le recueil (peut être vide)",
+              "anyOf": [
+                {"type": "string", "format": "uri"},
+                {"type": "string", "maxLength": 0}
+              ],
+              "examples": [
+                "",
+                "https://side.developpement-durable.gouv.fr/Default/doc/SYRACUSE/345804/plan-d-action-zones-humides-comment-les-preserver-comment-les-restaurer-actions-menees-sur-le-bassin",
+                "https://www.eau-artois-picardie.fr/sites/default/files/recueil_doperations_en_zones_humides.pdf",
+                "https://centrederessources-loirenature.com/sites/default/files/ged/Receuil_BD_complet.pdf"
+              ]
+            }
+          },
+          "required": ["pages_extraire", "recueil_complet"],
+          "additionalProperties": false
+	  }
+		
+	},
+	"required": [
+	  "Presentation",
+	  "Typologie",
+	  "Enjeux",
+  	  "Directives",
+	  "Travaux",
+	  "Contexte",
+  	  "Objectif",
+	  "Description",
+	  "Valorisation",
+	  "Documents"
+	],
+	"additionalProperties": false
+}
