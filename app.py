@@ -3,14 +3,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-from dotenv import load_dotenv
 import json
 import time
 from st_mui_table import st_mui_table
 from pathlib import Path
 
-# Load environment variables
-load_dotenv()
 
 # Configure page
 st.set_page_config(
@@ -150,7 +147,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
     """
     try:
         # Initialize Mistral client
-        api_key = os.getenv('MISTRAL_API_KEY')
+        api_key = st.secrets['MISTRAL_API_KEY']
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment variables")
         
@@ -158,7 +155,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         client = Mistral(api_key=api_key)
         
         # Define model to use
-        model = "mistral-large-latest"
+        model = "mistral-medium-latest"
         
         if progress_callback:
             progress_callback(0.1, "Upload du fichier vers Mistral...")
