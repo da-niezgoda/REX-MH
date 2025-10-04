@@ -8,9 +8,6 @@ import time
 from st_mui_table import st_mui_table
 from pathlib import Path
 
-# Load environment variables
-load_dotenv()
-
 # Configure page
 st.set_page_config(
     page_title="REX Zones Humides",
