@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-from dotenv import load_dotenv
 import json
 import time
 from st_mui_table import st_mui_table
@@ -150,7 +149,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
     """
     try:
         # Initialize Mistral client
-        api_key = os.getenv('MISTRAL_API_KEY')
+        api_key = st.secrets['MISTRAL_API_KEY']
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment variables")
         
