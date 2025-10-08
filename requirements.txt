@@ -5,3 +5,4 @@ requests==2.32.5
 st-mui-table==0.0.6
 streamlit==1.49.1
 streamlit-extras==0.6.0
+openpyxl==3.1.5
