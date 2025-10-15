@@ -187,6 +187,8 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
 
         clean_doc = clean_document(ocr_response)
 
+        print(clean_doc)
+
         # Extraction de la liste de projets
         if progress_callback:
             progress_callback(0.3, "Extraction de la liste de projets...")
