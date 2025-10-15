@@ -224,6 +224,8 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         # Get the list of projects
         projects = project_list_dict.get("Liste", [])
         
+        print("projects", projects)
+
         if not projects:
             raise Exception("Aucun projet trouvé dans le document")
         
