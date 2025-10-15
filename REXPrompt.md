@@ -17,9 +17,22 @@ Extraire toutes les informations pertinentes du PDF et les formater strictement 
 3.  **Formatage de la Sortie :** Tu dois impérativement formater la sortie en un objet JSON valide, sans aucun texte additionnel, commentaire, introduction ou conclusion. La réponse doit commencer par `{` et se terminer par `}`.
 
 
+## FORMAT D'ENTREE
+
+Le document vous est fournis page par page, avec le numéro de page associé pour chacune, sous la forme d'un fichier JSON avec : 
+
+ * "pages" : le container principal
+
+ * "page_number": la numéro de la page
+
+ * "content": le contenu de la page
+
+
 ## GESTION DES CAS PARTICULIERS :
 
-Si une information requise par le schéma est absente du document, utilisez une chaîne vide "".
+ * Si une information requise par le schéma est absente du document, utilisez une chaîne vide "".
+
+ * Utilisez le champ "page_number" pour obtenir les informations associées.
 
 
 ## SCHEMA JSON A UTILISER :
@@ -30,7 +43,8 @@ Le résultat doit impérativement respecter ce schéma.
 {{ SCHEMA_JSON }}
 ```
 
-## Format de Sortie Requis :
+
+## FORMAT DE SORTIE REQUIS :
 
 Retournez directement le JSON respectant scrupuleusement le schéma JSON et les données extraites du PDF.
 

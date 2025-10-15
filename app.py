@@ -193,6 +193,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         
         project_list_response = client.chat.complete(
             model=model,
+            temperature=0.1,
             messages=[
                 {
                     "role": "system",
@@ -259,6 +260,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                 # Analyze specific project with Mistral
                 project_analysis_response = client.chat.complete(
                     model=model,
+                    temperature=0.1,
                     messages=[
                         {
                             "role": "system",
