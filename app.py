@@ -611,7 +611,8 @@ def create_excel_download(data):
     # Convert to Excel
     from io import BytesIO
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    #with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='REX')
 
     return output.getvalue()
