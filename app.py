@@ -187,8 +187,6 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
 
         clean_doc = clean_document(ocr_response)
 
-        print(clean_doc)
-
         # Extraction de la liste de projets
         if progress_callback:
             progress_callback(0.3, "Extraction de la liste de projets...")
@@ -238,6 +236,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         # Calculate progress increment per project
         progress_per_project = 0.4 / len(projects) if projects else 0
         
+        print("lenprojects:", len(projects))
         # Loop through project list
         for idx, project in enumerate(projects):
             try:
@@ -259,6 +258,8 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                 # Extract pages for this specific project
                 project_pages = clean_pages(ocr_response, start_page, end_page)
                 
+                print("project_pages:", idx, project_pages)
+
                 # Analyze specific project with Mistral
                 project_analysis_response = client.chat.complete(
                     model=model,
