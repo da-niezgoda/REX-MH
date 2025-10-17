@@ -109,13 +109,13 @@
                 "Amélioration des voies navigables",
                 "Connaissance et suivis",
                 "Création de milieux",
-                "Éradication",
+                "Éradication d'espèce",
                 "Gouvernance",
                 "Ouverture au public",
-                "Préservation et gestion",
+                "Préservation et gestion de milieu",
                 "Réaffectation",
                 "Restauration et réhabilitation",
-                "Translocation et réintroduction",
+                "Translocation et réintroduction d'espèce",
                 ""
               ]
             },
@@ -172,12 +172,6 @@
               "description": "Selon la définition des SDAGE, au niveau des Agences de l'Eau",
               "type": "string",
               "enum": [
-                "Cours d'eau",
-                "Canal",
-                "Cours d'eau de plaine",
-                "Cours d'eau de tête de bassin",
-                "Cours d'eau de zone intermédiaire",
-                "Zones humides",
                 "Baies et estuaires moyens et plats",
                 "Bordures de cours d'eau et plaine alluviale",
                 "Bordures de plans deau",
@@ -186,7 +180,6 @@
                 "Marais et lagunes côtiers",
                 "Marais et landes humides de plaines et plateaux",
                 "Marais saumâtres aménagés",
-                "Plaines alluviales",
                 "Régions détangs",
                 "Zones humides artificielles",
                 "Zones humides de bas-fonds en tête de bassin (Ou zones humides de montagne, colline)",
@@ -326,7 +319,7 @@
                   "Qualité de leau",
                   "Réduction des étiages",
                   "Réduction des risques dinondation",
-                  "Ressource en eau (quantité)",
+                  "Quantité d'eau disponible dans le milieu",
                   "Restauration de frayères"
                 ]
               },
