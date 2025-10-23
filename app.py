@@ -193,7 +193,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         
         project_list_response = client.chat.complete(
             model=model,
-            temperature=0.1,
+            temperature=0.0,
             messages=[
                 {
                     "role": "system",
@@ -259,7 +259,7 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                 # Analyze specific project with Mistral
                 project_analysis_response = client.chat.complete(
                     model=model,
-                    temperature=0.1,
+                    temperature=0.0,
                     messages=[
                         {
                             "role": "system",
@@ -285,7 +285,6 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                     project_data['_page_debut'] = start_page
                     project_data['_page_fin'] = end_page
                     parsed_data.append(project_data)
-                    print(f"Projet '{project_title}' analysé avec succès")
                 except json.JSONDecodeError as e:
                     print(f"Warning: Erreur lors du parsing du projet '{project_title}': {str(e)}")
                     continue
@@ -657,8 +656,6 @@ def display_results_table():
             "Détails": format_expanded_data(project)
         })
     
-        print(project)
-
     df = pd.DataFrame(df_data)
     
     # Display table with expandable details
