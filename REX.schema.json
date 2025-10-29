@@ -205,7 +205,7 @@
               ]
             },
             "type_genie_ecologique": {
-              "description": "Technique physique ou méthode principale mise en œuvre sur le terrain dans cette action d'ingénierie écologique. Si plusieurs techniques sont utilisées, choisir la plus significative ou la plus structurante pour le projet. Se référer à la description des travaux.",
+              "description": "Technique physique ou méthode principale mise en œuvre sur le terrain dans cette action d'ingénierie écologique. Si plusieurs techniques sont utilisées, choisir la plus significative ou la plus structurante pour le projet. Se référer à la description des travaux. en cas de projet d'aquisition foncière, de remplir la case 'type d'ingénierie écologique' avec 'préservation et gestion' et la case 'type de génie écologique - autre' avec 'maîtrise foncière'",
               "type": "string",
               "enum": [
                 "Aménagement de dispositif pour abreuver",
@@ -384,8 +384,8 @@
           "properties": {
             "surface_travaux": {
               "type": "string",
-              "description": "Indiquer la superficie (en hectares, m²) concernée par les travaux en précisant l'unité. Si l'information n'est pas disponible ou non pertinente, laisser vide.",
-              "examples": ["", "21"]
+              "description": "Indiquer la superficie (surface) concernée par les travaux en précisant l'unité (hectar ou m²). Si l'information n'est pas disponible ou non pertinente, laisser vide.",
+              "examples": ["", "21ha"]
             }
           },
           "required": ["surface_travaux"],
@@ -499,24 +499,31 @@
               "description": "Texte d'ancrage descriptif pour le lien URL (ex: 'Voir la fiche projet', 'Lien vers le recueil 2010'). Laisser vide si pas de lien.",
               "examples": [""]
             },
-            "type_valorisation": {
-              "type": "string",
-              "description": "Sélectionner le type principal de valorisation ou de communication réalisé autour du projet, tel que mentionné dans le document.",
-              "enum": [
-                "Médias",
-                "Sentiers pédagogiques",
-                "Document de communications",
-                "Prix ou récompense",
-                "Site Ramsar",
-                ""
-              ],
-              "examples": [
-                "Document de communications"
-              ]
-            },
+		"type_valorisation": {
+		  "type": "array",
+		  "description": "Sélectionner le ou les types de valorisation ou de communication réalisés autour du projet, tels que mentionnés dans le document.",
+		  "items": {
+		    "type": "string",
+		    "enum": [
+		      "Médias",
+		      "Sentiers pédagogiques",
+		      "Document de communications",
+		      "Prix ou récompense",
+		      "Site Ramsar",
+		      ""
+		    ]
+		  },
+		  "uniqueItems": true,
+		  "examples": [
+		    ["Document de communications"],
+		    ["Médias", "Prix ou récompense"],
+		    ["Sentiers pédagogiques", "Document de communications", "Site Ramsar"]
+		  ]
+		}
+	    ,
             "prix_recompense": {
               "type": "string",
-              "description": "Nom du prix ou de la récompense obtenu pour le projet, le cas échéant. Laisser vide si aucun.",
+              "description": "Texte ouvert pour préciser le nom du prix ou de la récompense obtenu pour le projet, le cas échéant. Laisser vide si aucun.",
               "examples": [""]
             }
           },
