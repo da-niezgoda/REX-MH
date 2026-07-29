@@ -7,6 +7,19 @@ import json
 import time
 from st_mui_table import st_mui_table
 from pathlib import Path
+from mistralai.client import Mistral
+
+
+# --- Modèles Mistral ---------------------------------------------------------
+# On appelle les alias "-latest" pour suivre les montées de version, et on
+# enregistre la version réellement résolue par l'API à chaque appel (voir
+# _resolved_model) afin que deux extractions restent comparables.
+MODEL_OCR = "mistral-ocr-4-0"              # OCR 4 : blocs structurels + confiance
+MODEL_EXTRACTION = "mistral-medium-latest"  # Medium 3.5 : le plus précis
+MODEL_SEGMENTATION = "mistral-small-latest"  # Small 4 : rapide, suffisant pour découper
+
+# Graine fixe : deux exécutions sur le même document doivent donner le même résultat.
+RANDOM_SEED = 20260729
 
 
 # Configure page
@@ -74,6 +87,48 @@ def load_prompt(prompt_name, schema=None):
     except Exception as e:
         st.error(f"Error loading prompt {prompt_name}: {str(e)}")
         return None
+
+
+def strict_schema(node):
+    """
+    Rend un schéma JSON compatible avec le mode strict de l'API Mistral :
+    tout objet doit interdire les propriétés supplémentaires.
+
+    Même logique que le helper interne du SDK (rec_strict_json_schema), mais sans
+    dépendre d'un module privé. Les schémas du dépôt sont déjà conformes ; cette
+    passe est une ceinture de sécurité si un champ est ajouté sans y penser.
+    """
+    if isinstance(node, dict):
+        if node.get("type") == "object":
+            node["additionalProperties"] = False
+        return {k: strict_schema(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [strict_schema(v) for v in node]
+    return node
+
+
+def json_schema_format(name, schema):
+    """
+    Construire le response_format "json_schema" strict attendu par l'API Mistral.
+
+    Remplace l'ancien mode json_object : le modèle ne peut plus inventer une clé
+    hors schéma ni sortir d'une énumération, ce qui supprime à la source les
+    dérives constatées côté client (« Natura 2000 » au lieu de « Site Natura
+    2000 », singulier/pluriel des types Ramsar).
+    """
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "schema": strict_schema(json.loads(json.dumps(schema))),
+            "strict": True,
+        },
+    }
+
+
+def _resolved_model(response, fallback):
+    """Version de modèle réellement servie par l'API (pour la traçabilité)."""
+    return getattr(response, "model", None) or fallback
 
 
 def clean_document(ocr_response):
@@ -151,12 +206,8 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment variables")
         
-        from mistralai import Mistral
         client = Mistral(api_key=api_key)
-        
-        # Define model to use
-        model = "mistral-medium-latest"
-        
+
         if progress_callback:
             progress_callback(0.1, "Upload du fichier vers Mistral...")
         
@@ -177,12 +228,24 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
             progress_callback(0.2, "Traitement OCR du document...")
         
         ocr_response = client.ocr.process(
-            model="mistral-ocr-latest",
+            model=MODEL_OCR,
             document={
                 "type": "document_url",
                 "document_url": signed_url.url,
             },
-            include_image_base64=False
+            include_image_base64=False,
+            # OCR 4 : blocs structurels (titre / texte / tableau…) en ordre de
+            # lecture, avec coordonnées. Serviront de candidats de découpe entre
+            # fiches projet.
+            include_blocks=True,
+            # En-têtes et pieds de page du recueil sortis du corps de texte :
+            # ils polluaient la segmentation.
+            extract_header=True,
+            extract_footer=True,
+            # Score de confiance par page : permet de repérer les pages mal
+            # océrisées avant de blâmer le prompt d'extraction.
+            confidence_scores_granularity="page",
+            table_format="markdown",
         )
 
         clean_doc = clean_document(ocr_response)
@@ -192,8 +255,9 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
             progress_callback(0.3, "Extraction de la liste de projets...")
         
         project_list_response = client.chat.complete(
-            model=model,
+            model=MODEL_SEGMENTATION,
             temperature=0.0,
+            random_seed=RANDOM_SEED,
             messages=[
                 {
                     "role": "system",
@@ -204,13 +268,14 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                     "content": clean_doc,
                 }
             ],
-            response_format={
-                "type": "json_object",
-            }
+            response_format=json_schema_format(
+                "rex_liste_projets", st.session_state.REXListSchema
+            ),
         )
 
         project_list_json = project_list_response.choices[0].message.content
-        
+        model_segmentation = _resolved_model(project_list_response, MODEL_SEGMENTATION)
+
         if progress_callback:
             progress_callback(0.4, "Vérification des projets...")
         
@@ -231,6 +296,12 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
         
         # Initialize parsed data list
         parsed_data = []
+
+        # Construit une seule fois : le schéma pèse ~34 Ko, inutile de le
+        # recopier à chaque fiche.
+        extraction_format = json_schema_format(
+            "rex_fiche_projet", st.session_state.REXSchema
+        )
         
         # Calculate progress increment per project
         progress_per_project = 0.4 / len(projects) if projects else 0
@@ -258,8 +329,9 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                 
                 # Analyze specific project with Mistral
                 project_analysis_response = client.chat.complete(
-                    model=model,
+                    model=MODEL_EXTRACTION,
                     temperature=0.0,
+                    random_seed=RANDOM_SEED,
                     messages=[
                         {
                             "role": "system",
@@ -270,11 +342,9 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                             "content": project_pages,
                         }
                     ],
-                    response_format={
-                        "type": "json_object",
-                    }
+                    response_format=extraction_format,
                 )
-                
+
                 project_data_json = project_analysis_response.choices[0].message.content
                 
                 # Parse project data
@@ -284,6 +354,12 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
                     project_data['_project_title'] = project_title
                     project_data['_page_debut'] = start_page
                     project_data['_page_fin'] = end_page
+                    # Traçabilité : quelle version de modèle a produit cette fiche.
+                    project_data['_model_ocr'] = MODEL_OCR
+                    project_data['_model_segmentation'] = model_segmentation
+                    project_data['_model_extraction'] = _resolved_model(
+                        project_analysis_response, MODEL_EXTRACTION
+                    )
                     parsed_data.append(project_data)
                 except json.JSONDecodeError as e:
                     print(f"Warning: Erreur lors du parsing du projet '{project_title}': {str(e)}")

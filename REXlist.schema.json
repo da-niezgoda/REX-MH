@@ -29,7 +29,7 @@
           "PageDebut",
           "PageFin"
         ],
-        "additionnalProperties": false
+        "additionalProperties": false
       },
       "minItems": 1
     }
@@ -37,5 +37,5 @@
   "required": [
     "Liste"
   ],
-  "additionnalProperties": false
+  "additionalProperties": false
 }
