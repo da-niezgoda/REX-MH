@@ -1,0 +1,15 @@
+# Claude Code local config, vendored skills, project instructions and session plans
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+plan.md
+
+# Secrets — never commit
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
