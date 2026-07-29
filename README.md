@@ -1,5 +1,7 @@
 # 🌿 REX-MH — Extraction de Retours d'Expérience « Zones Humides »
 
+**Application en ligne : [rex-mh-oieau.streamlit.app](https://rex-mh-oieau.streamlit.app)**
+
 Application **Streamlit** qui transforme un recueil PDF de retours d'expérience (REX) sur des projets
 de gestion, restauration ou conservation de **zones humides** en données structurées, exportables en Excel.
 
@@ -107,11 +109,15 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Renseigner la clé API Mistral dans `.streamlit/secrets.toml` (lue via `st.secrets['MISTRAL_API_KEY']`) :
+Renseigner la clé API Mistral. En local, dans un fichier `.env` à la racine :
 
-```toml
-MISTRAL_API_KEY = "..."
+```dotenv
+MISTRAL_API_KEY=...
 ```
+
+En déploiement (Streamlit Community Cloud), la même clé se déclare dans les *secrets* de
+l'application. `get_api_key()` regarde `st.secrets` d'abord, puis l'environnement / `.env`, si bien
+que le même code fonctionne dans les deux contextes.
 
 Puis :
 
@@ -128,8 +134,8 @@ Pour vérifier la chaîne Mistral sans lancer l'interface (peu coûteux, 18 page
 .venv/bin/python smoke_test.py
 ```
 
-> ⚠️ `.streamlit/secrets.toml` ne doit jamais être commité — il est ignoré par le `.gitignore`,
-> tout comme `.claude/` (configuration locale de l'agent).
+> ⚠️ `.env` et `.streamlit/secrets.toml` ne doivent jamais être commités — ils sont ignorés par le
+> `.gitignore`, tout comme `.claude/` (configuration locale de l'agent).
 
 ---
 
@@ -155,14 +161,20 @@ Le dépôt est propre sur `main`, aucun travail en cours non commité.
 
 - Pas d'exemple de secrets versionné (`.streamlit/secrets.toml.example`).
 - Le schéma est envoyé deux fois par appel (injecté dans le prompt via `{{ SCHEMA_JSON }}` **et** passé
-  en `response_format`). Redondance assumée tant qu'aucun harnais d'évaluation ne permet de mesurer
-  l'effet de la suppression de la copie dans le prompt.
+  en `response_format`), soit ~12 000 tokens d'entrée par fiche, sans mise en cache du prompt.
+  Redondance assumée tant qu'aucun harnais d'évaluation ne permet de mesurer l'effet de la
+  suppression de la copie dans le prompt.
+- Le mode strict de Mistral n'accepte pas `anyOf`, `format`, `uniqueItems`, `$ref`, `oneOf`, `allOf`
+  (erreur 400 / code 3051). Ces mots-clés ont été retirés du schéma au profit de `pattern` ;
+  conséquence : les doublons dans `type_valorisation` ne sont plus interdits par le schéma.
+- La segmentation confond encore fiches projet et pages de sommaire : sur l'extrait de 18 pages,
+  7 segments sont renvoyés pour 3 vraies fiches. Les blocs structurels de l'OCR 4 sont demandés mais
+  pas encore exploités pour corriger cela.
 - Pas encore de validation *a posteriori* du JSON renvoyé contre `REX.schema.json` : le mode strict
   empêche les dérives à la génération, mais rien ne le vérifie ni ne le journalise côté application.
 - Aucune persistance : le résultat vit dans `st.session_state` et disparaît au rechargement.
 - Traitement séquentiel des projets — un recueil de 50 fiches enchaîne 50 appels LLM.
 - Le fallback d'affichage du tableau lit `project["presentation"]["titre"]` (minuscules) alors que le
   schéma produit `Presentation` / `Titre` : ce chemin d'erreur retombe donc sur « Projet N ».
-- Les blocs structurels de l'OCR 4 sont demandés mais pas encore exploités pour la segmentation.
 - Aucun test automatisé.
 - Les deux PDF d'exemple (10,6 Mo) sont versionnés dans le dépôt.

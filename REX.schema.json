@@ -484,10 +484,7 @@
             "url": {
               "type": "string",
               "description": "Indiquer l'URL directe vers la fiche projet spécifique ou le recueil en ligne, si disponible et accessible. Laisser vide si non applicable.",
-              "anyOf": [
-                {"type": "string", "format": "uri"},
-                {"type": "string", "maxLength": 0}
-              ],
+              "pattern": "^(https?://\\S+)?$",
               "examples": [
                 "",
                 "https://side.developpement-durable.gouv.fr/Default/doc/SYRACUSE/345804/plan-d-action-zones-humides-comment-les-preserver-comment-les-restaurer-actions-menees-sur-le-bassin",
@@ -514,7 +511,6 @@
 		      ""
 		    ]
 		  },
-		  "uniqueItems": true,
 		  "examples": [
 		    ["Document de communications"],
 		    ["Médias", "Prix ou récompense"],
@@ -539,10 +535,7 @@
             "pages_extraire": {
               "type": "string",
               "description": "Indiquer la première et la dernière page du document source qui traitent du projet, au format 'première-dernière' (ex: '67-75'). Laisser vide si l'information n'est pas disponible ou s'il s'agit d'un document numérique non paginé.",
-              "anyOf": [
-                {"type": "string", "pattern": "^[0-9]+-[0-9]+$"},
-                {"type": "string", "maxLength": 0}
-              ],
+              "pattern": "^([0-9]+-[0-9]+)?$",
               "examples": [
                 "",
                 "67-75",
@@ -553,10 +546,7 @@
             "recueil_complet": {
               "type": "string",
               "description": "Lien URL vers le document source complet (le recueil PDF, le site web, etc.). Laisser vide si non disponible.",
-              "anyOf": [
-                {"type": "string", "format": "uri"},
-                {"type": "string", "maxLength": 0}
-              ],
+              "pattern": "^(https?://\\S+)?$",
               "examples": [
                 "",
                 "https://side.developpement-durable.gouv.fr/Default/doc/SYRACUSE/345804/plan-d-action-zones-humides-comment-les-preserver-comment-les-restaurer-actions-menees-sur-le-bassin",

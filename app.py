@@ -7,7 +7,11 @@ import json
 import time
 from st_mui_table import st_mui_table
 from pathlib import Path
+from dotenv import load_dotenv
 from mistralai.client import Mistral
+
+# Charge .env en local ; sans effet en déploiement (Streamlit Cloud utilise st.secrets).
+load_dotenv()
 
 
 # --- Modèles Mistral ---------------------------------------------------------
@@ -89,19 +93,54 @@ def load_prompt(prompt_name, schema=None):
         return None
 
 
+def get_api_key():
+    """
+    Clé API Mistral, dans l'ordre :
+      1. st.secrets  — utilisé par Streamlit Community Cloud (rex-mh-oieau.streamlit.app)
+      2. variable d'environnement / .env  — développement local
+
+    st.secrets lève une exception quand aucun secrets.toml n'existe, d'où le try.
+    """
+    try:
+        key = st.secrets["MISTRAL_API_KEY"]
+        if key:
+            return key
+    except Exception:
+        pass
+    return os.environ.get("MISTRAL_API_KEY")
+
+
+# Mots-clés JSON Schema que le mode strict de Mistral refuse (erreur 3051,
+# « Invalid structured output syntax »), vérifiés un par un contre l'API :
+#   - anyOf / oneOf / allOf / not : pas d'union ni de composition
+#   - format ("uri", "date"…)     : non reconnu
+#   - uniqueItems                 : non reconnu
+# En revanche pattern, maxLength, minimum, examples, enum (même 53 valeurs),
+# tableaux d'enum et objets imbriqués passent sans problème.
+UNSUPPORTED_SCHEMA_KEYWORDS = (
+    "anyOf", "oneOf", "allOf", "not", "format", "uniqueItems", "$ref", "if", "then", "else",
+)
+
+
 def strict_schema(node):
     """
-    Rend un schéma JSON compatible avec le mode strict de l'API Mistral :
-    tout objet doit interdire les propriétés supplémentaires.
+    Rend un schéma JSON acceptable par le mode strict de l'API Mistral :
+      1. tout objet interdit les propriétés supplémentaires ;
+      2. les mots-clés non supportés sont retirés.
 
-    Même logique que le helper interne du SDK (rec_strict_json_schema), mais sans
-    dépendre d'un module privé. Les schémas du dépôt sont déjà conformes ; cette
-    passe est une ceinture de sécurité si un champ est ajouté sans y penser.
+    Les schémas du dépôt sont déjà conformes ; cette passe est une ceinture de
+    sécurité pour qu'un ajout de champ malheureux dégrade la validation au lieu
+    de faire échouer tout le traitement avec une erreur 400 peu parlante.
     """
     if isinstance(node, dict):
-        if node.get("type") == "object":
-            node["additionalProperties"] = False
-        return {k: strict_schema(v) for k, v in node.items()}
+        cleaned = {
+            k: strict_schema(v)
+            for k, v in node.items()
+            if k not in UNSUPPORTED_SCHEMA_KEYWORDS
+        }
+        if cleaned.get("type") == "object":
+            cleaned["additionalProperties"] = False
+        return cleaned
     if isinstance(node, list):
         return [strict_schema(v) for v in node]
     return node
@@ -202,9 +241,12 @@ def parse_pdf_document(file_content, filename, progress_callback=None):
     """
     try:
         # Initialize Mistral client
-        api_key = st.secrets['MISTRAL_API_KEY']
+        api_key = get_api_key()
         if not api_key:
-            raise ValueError("MISTRAL_API_KEY not found in environment variables")
+            raise ValueError(
+                "MISTRAL_API_KEY introuvable — renseignez .env en local "
+                "ou les secrets de l'application en déploiement."
+            )
         
         client = Mistral(api_key=api_key)
 

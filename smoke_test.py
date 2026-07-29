@@ -5,13 +5,12 @@ Vérification en direct de la chaîne Mistral après la montée de version (tâc
 Consomme volontairement peu de crédits : 1 OCR + 1 segmentation + 1 extraction
 (la première fiche uniquement) sur l'extrait de 18 pages.
 
+La clé est lue comme par l'application : .env en local, st.secrets en déploiement.
+
 Usage :
-    MISTRAL_API_KEY=... .venv/bin/python smoke_test.py
-    # ou, si .streamlit/secrets.toml existe, sans variable d'environnement :
     .venv/bin/python smoke_test.py
 """
 import json
-import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -26,6 +25,7 @@ from app import (  # noqa: E402
     RANDOM_SEED,
     clean_document,
     clean_pages,
+    get_api_key,
     json_schema_format,
     load_prompt,
     load_schema,
@@ -35,15 +35,10 @@ PDF = Path("IFD_FICJOINT_0020373-1-18.pdf")
 
 
 def api_key():
-    key = os.environ.get("MISTRAL_API_KEY")
-    if key:
-        return key
-    secrets = Path(".streamlit/secrets.toml")
-    if secrets.exists():
-        for line in secrets.read_text().splitlines():
-            if line.strip().startswith("MISTRAL_API_KEY"):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    sys.exit("MISTRAL_API_KEY absent (variable d'environnement ou .streamlit/secrets.toml)")
+    key = get_api_key()
+    if not key:
+        sys.exit("MISTRAL_API_KEY absent (.env ou variable d'environnement)")
+    return key
 
 
 def main():
@@ -110,8 +105,15 @@ def main():
     if not projects:
         sys.exit("      Aucun projet : segmentation à revoir avant d'aller plus loin.")
 
-    first = projects[0]
-    print(f"\n[4/4] Extraction de la 1re fiche avec {MODEL_EXTRACTION} (json_schema strict)")
+    # Le 1er segment est souvent l'introduction du recueil : passer un numéro en
+    # argument pour extraire une vraie fiche (ex. `smoke_test.py 6`).
+    index = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+    index = max(1, min(index, len(projects)))
+    first = projects[index - 1]
+    print(
+        f"\n[4/4] Extraction de la fiche {index}/{len(projects)} "
+        f"(p.{first['PageDebut']}-{first['PageFin']}) avec {MODEL_EXTRACTION} (json_schema strict)"
+    )
     ext = client.chat.complete(
         model=MODEL_EXTRACTION,
         temperature=0.0,
