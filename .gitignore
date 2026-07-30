@@ -8,6 +8,18 @@ plan.md
 .streamlit/secrets.toml
 .env
 
+# Historique local — contient le contenu de vrais documents, jamais versionné.
+# Les fichiers -wal / -shm sont créés par le mode WAL et ne sont pas couverts par *.db.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Charges OCR figées : sortie analysée d'un vrai document. À regénérer avec
+# `smoke_test.py --figer-fixture`. La tâche 3 décidera si elles doivent être
+# versionnées et sous quelle forme.
+tests/fixtures/
+
 # Python
 __pycache__/
 *.py[cod]

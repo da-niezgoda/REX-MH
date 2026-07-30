@@ -18,23 +18,36 @@ un export `.xlsx`.
 ```
 PDF déposé
    │
-   ├─▶ 1. Upload vers l'API Mistral (files.upload, purpose="ocr")
+   ├─▶ 1. Empreinte du contenu (sha256) → cache OCR consulté
+   │        si le PDF a déjà été océrisé : on passe directement à l'étape 4
    │
-   ├─▶ 2. OCR document complet  (mistral-ocr-4-0)
+   ├─▶ 2. Upload vers l'API Mistral (files.upload, purpose="ocr"), puis suppression
+   │
+   ├─▶ 3. OCR document complet  (mistral-ocr-4-0)
    │        → pages { page_number, content(markdown) }, blocs structurels,
    │          en-têtes/pieds séparés, score de confiance par page
+   │        → charge gzippée en base : les traitements suivants sont gratuits
    │
-   ├─▶ 3. Segmentation  (mistral-small-latest + listPrompt.md + REXlist.schema.json)
+   ├─▶ 4. Segmentation  (mistral-small-latest + listPrompt.md + REXlist.schema.json)
    │        → { "Liste": [ { Titre, PageDebut, PageFin }, … ] }
+   │        → bornes validées : un segment hors document ou à page 0 est refusé
+   │          AVANT d'être payé, et remonte comme échec nommé
    │
-   ├─▶ 4. Pour chaque projet de la liste :
-   │        - découpe des pages du segment (clean_pages)
-   │        - extraction structurée (mistral-medium-latest + REXPrompt.md + REX.schema.json)
-   │        → un objet JSON par projet, enrichi de _project_title / _page_debut / _page_fin
+   ├─▶ 5. Extraction, selon le mode choisi :
+   │        « rapide »     → 1 fiche seule (amorçage du cache de prompt) puis
+   │                         les autres en parallèle (4 à la fois)
+   │        « économique » → un travail par lot (-50 %), à récolter plus tard
+   │        (mistral-medium-latest + REXPrompt.md + REX.schema.json)
+   │        → un objet JSON par fiche, enrichi de _project_title / _page_debut /
+   │          _page_fin / _model_* / _prompt_hash
    │
-   ├─▶ 5. Affichage : tableau Material UI (st_mui_table) avec ligne dépliable par projet
+   ├─▶ 6. Persistance SQLite : document, traitement, une ligne par fiche
+   │        (y compris les fiches en échec, pour pouvoir les relancer)
    │
-   └─▶ 6. Export : aplatissement des sections en colonnes → Excel (xlsxwriter)
+   ├─▶ 7. Affichage : tableau Material UI (st_mui_table) avec ligne dépliable,
+   │        panneau des fiches en échec, onglet Historique
+   │
+   └─▶ 8. Export : aplatissement des sections en colonnes → Excel (xlsxwriter)
 ```
 
 Points de conception notables :
@@ -53,10 +66,32 @@ Points de conception notables :
   `mistral-medium-latest` (Medium 3.5) est réservé à l'extraction. Les trois modèles sont déclarés en
   tête de `app.py` ; la version réellement servie par l'API est enregistrée sur chaque fiche
   (`_model_extraction`) pour que deux extractions restent comparables.
-- **Tolérance aux pannes partielles :** un projet dont le JSON est invalide ou dont l'appel échoue est
-  ignoré (avertissement en console) sans faire échouer le traitement du reste du document.
-- **Progression :** un `progress_callback` remonte l'avancement (upload → OCR → segmentation → n
-  extractions) dans la barre de progression Streamlit.
+- **Cache de prompt.** Le prompt système (~12 000 jetons, schéma inclus) est identique pour toutes
+  les fiches. Une `prompt_cache_key` stable — dérivée de l'empreinte du prompt *rendu* et du modèle —
+  fait facturer ces jetons 10 % du tarif dès qu'ils sont servis depuis le cache. Le cache étant
+  écrit par le premier appel, la première fiche part **seule** avant que les suivantes
+  s'éventaillent : sans cet amorçage, N appels simultanés manqueraient tous le cache.
+  Mesuré : en séquentiel, la 2ᵉ fiche atteint **93 %** de jetons de prompt en cache. En parallèle,
+  seule la première vague d'appels simultanés manque le cache (les 4 fiches en vol ensemble), toutes
+  les suivantes le touchent — le surcoût est donc borné par la limite de concurrence et s'amortit
+  d'autant mieux que le recueil est gros (37 % sur 7 fiches, l'essentiel des fiches d'un recueil de
+  plusieurs dizaines).
+- **Deux modes d'extraction.** « Rapide » parallélise (4 appels en vol) et affiche le résultat tout
+  de suite ; « économique » soumet un travail par lot à moitié prix, dont les résultats se récoltent
+  plus tard — l'onglet peut être fermé entre-temps. Ils s'excluent : dans un lot, c'est Mistral qui
+  ordonnance, il n'y a rien à paralléliser côté client.
+- **Rien n'est perdu en silence.** Chaque fiche en échec est enregistrée avec sa plage de pages, sa
+  catégorie (`quota`, `timeout`, `json_invalide`, `segment_invalide`, `bug`…) et sa trace, puis
+  affichée. Le bouton de relance repart de l'OCR en cache, sans repayer ni OCR ni découpage.
+- **Tolérance aux pannes partielles :** une fiche qui échoue n'emporte pas le reste du document. En
+  revanche un bug de l'application détecté sur la fiche d'amorçage interrompt le traitement, plutôt
+  que de se reproduire N fois.
+- **Progression :** un `progress_callback` remonte l'avancement, pondéré par phase (upload 5 %,
+  OCR 25 %, segmentation 10 %, extraction 60 %) et compté sur les fiches **terminées** — sous
+  parallélisme, compter les envois ferait sauter la barre à 100 % dès la dernière soumission.
+- **Historique local (SQLite).** Documents, traitements et fiches sont conservés : on rouvre un
+  résultat et on réexporte en Excel sans un seul appel d'API. Une archive ZIP permet de sauvegarder
+  et restaurer l'historique — indispensable en déploiement, où le disque est éphémère.
 
 ---
 
@@ -64,13 +99,16 @@ Points de conception notables :
 
 | Fichier | Rôle |
 | --- | --- |
-| `app.py` | Application Streamlit complète : chargement des schémas/prompts, pipeline OCR + LLM, rendu du tableau, export Excel. |
+| `app.py` | Interface Streamlit et orchestration : chargement des schémas/prompts, enchaînement OCR → découpage → extraction, onglets Traitement / Historique, rendu du tableau, export Excel. |
 | `REXPrompt.md` | Prompt système d'**extraction** d'une fiche projet (rôle, format d'entrée page par page, gestion des champs absents → `""`). |
 | `listPrompt.md` | Prompt système de **segmentation** du recueil (identifier l'introduction/annexes, détecter les ruptures, définir `PageDebut`/`PageFin`). |
 | `REX.schema.json` | Modèle de données d'une fiche projet : 10 sections (`Presentation`, `Typologie`, `Enjeux`, `Directives`, `Travaux`, `Contexte`, `Objectif`, `Description`, `Valorisation`, `Documents`) avec descriptions détaillées et **énumérations métier** (23 régions, 11 types d'ingénierie écologique, 43 types de milieux Ramsar, 13 typologies SDAGE, 11 typologies hydrogéomorphologiques Sandre, 53 techniques de génie écologique, 15 enjeux, 17 statuts de protection…). |
 | `REXlist.schema.json` | Modèle de la liste de segments (`Liste[] : Titre, PageDebut, PageFin`). |
 | `styles.css` | Thème « Material 3 Expressive » eau & biodiversité (variables CSS, en-tête, cartes, uploader, boutons, messages). |
-| `smoke_test.py` | Vérification en direct de la chaîne Mistral (1 OCR + 1 segmentation + 1 extraction sur l'extrait 18 pages) : blocs structurels, conformité au schéma, champs signalés par le client. |
+| `pipeline.py` | Cœur du traitement : client Mistral, construction des requêtes, concurrence, mode par lot, classification des erreurs, comptabilité des jetons. **N'importe pas `streamlit`** (voir *Limites connues*). |
+| `store.py` | Persistance SQLite : cache OCR, historique des traitements, fiches, travaux par lot, export/import d'archive. N'importe pas `streamlit` non plus. |
+| `smoke_test.py` | Vérification en direct de la chaîne Mistral sur l'extrait 18 pages : blocs structurels, conformité au schéma, champs signalés par le client, et **mesure du cache de prompt** (deux fiches consécutives). Options `--fixture` (hors ligne, sans clé) et `--batch` (répétition du mode par lot). |
+| `tests/` | Trois vérifications hors ligne, sans clé API — voir `tests/README.md`. |
 | `requirements.txt` | Dépendances Python épinglées. |
 | `.devcontainer/devcontainer.json` | Dev container / Codespaces : Python 3.11, installation des requirements, lancement automatique de Streamlit sur le port 8501. |
 | `IFD_FICJOINT_0020373.PDF`, `IFD_FICJOINT_0020373-1-18.pdf` | Documents d'exemple servant de jeu de test (le second est un extrait des pages 1 à 18, plus rapide à traiter). |
@@ -89,12 +127,16 @@ Points de conception notables :
 | Segmentation | API Mistral — `mistral-small-latest` (Small 4) |
 | Extraction | API Mistral — `mistral-medium-latest` (Medium 3.5), `temperature=0`, `random_seed` fixe |
 | Contrat de données | JSON Schema draft-07, imposé au modèle en mode `json_schema` strict |
-| Données / export | `pandas`, `xlsxwriter` (Excel) |
+| Concurrence | `ThreadPoolExecutor` sur le client synchrone (4 extractions en vol) |
+| Persistance | SQLite (module standard), mode WAL, charges OCR gzippées |
+| Données / export | `pandas`, `xlsxwriter` (Excel), `zipfile` (archive d'historique) |
 | Style | CSS personnalisé injecté via `st.html` |
 | Environnement | Dev Container (`mcr.microsoft.com/devcontainers/python:1-3.11-bookworm`), déployable sur Streamlit Community Cloud |
 
-Dépendances présentes mais non encore utilisées dans `app.py` : `plotly`, `requests`, `streamlit-extras`
-(vestiges d'itérations antérieures / usages prévus).
+Dépendances présentes mais non encore utilisées : `plotly`, `requests`, `streamlit-extras`
+(vestiges d'itérations antérieures / usages prévus). La persistance, l'archivage et la concurrence
+n'ajoutent aucune dépendance : `sqlite3`, `gzip`, `zipfile`, `html` et
+`concurrent.futures` sont dans la bibliothèque standard.
 
 ---
 
@@ -134,8 +176,26 @@ Pour vérifier la chaîne Mistral sans lancer l'interface (peu coûteux, 18 page
 .venv/bin/python smoke_test.py
 ```
 
+Et les vérifications qui ne coûtent rien, sans clé API :
+
+```bash
+.venv/bin/python tests/check_store.py && .venv/bin/python tests/check_concurrence.py && .venv/bin/python tests/check_integration.py
+```
+
+### Historique et stockage
+
+L'historique est une base SQLite locale, `data/rex.db` par défaut (`REX_DB_PATH` pour en changer,
+en variable d'environnement ou en secret Streamlit). Elle contient le cache OCR — c'est ce qui rend
+gratuit tout retraitement d'un PDF déjà océrisé.
+
+> ⚠️ **En déploiement, ce stockage est éphémère** : Streamlit Community Cloud repart d'un disque
+> vierge à chaque redéploiement. L'onglet *Historique* propose de télécharger une archive ZIP et de
+> la restaurer ensuite ; c'est le seul moyen de conserver un jeu de documents traités, cache OCR
+> compris. N'importez que des archives dont vous connaissez la provenance : le format ne permet pas
+> de vérifier qu'une charge OCR correspond bien au PDF qu'elle prétend décrire.
+
 > ⚠️ `.env` et `.streamlit/secrets.toml` ne doivent jamais être commités — ils sont ignorés par le
-> `.gitignore`, tout comme `.claude/` (configuration locale de l'agent).
+> `.gitignore`, tout comme `.claude/`, `data/` et `*.db` (contenu de vrais documents).
 
 ---
 
@@ -152,29 +212,44 @@ Développement mené par une seule personne (`da-niezgoda` / `d.niezgoda`), 24 c
 | 15 oct. 2025 | Cœur du projet : branchement de l'IA (OCR + extraction Mistral), affinage du prompt de segmentation (« better decoupe »), passage de l'export Excel à `xlsxwriter`, itérations sur `app.py`. |
 | 17 – 23 oct. 2025 | Précisions et refonte du `REX.schema.json` (descriptions, énumérations métier), nettoyage des `print` / de la température. |
 | 29 oct. 2025 | Retouches finales du champ « résumé » du prompt et du schéma. |
-
-Le dépôt est propre sur `main`, aucun travail en cours non commité.
+| 29 – 30 juil. 2026 | **v2.** Montée en version du SDK (`mistralai` 2.x), OCR 4 et sorties structurées strictes ; puis cache de prompt, extraction parallèle, mode par lot, historique SQLite avec cache OCR, remontée des échecs par fiche et vérifications hors ligne. |
 
 ---
 
 ## Limites connues / pistes d'amélioration
 
-- Pas d'exemple de secrets versionné (`.streamlit/secrets.toml.example`).
-- Le schéma est envoyé deux fois par appel (injecté dans le prompt via `{{ SCHEMA_JSON }}` **et** passé
-  en `response_format`), soit ~12 000 tokens d'entrée par fiche, sans mise en cache du prompt.
-  Redondance assumée tant qu'aucun harnais d'évaluation ne permet de mesurer l'effet de la
-  suppression de la copie dans le prompt.
+- **La segmentation sur-découpe** : sur l'extrait de 18 pages, 7 segments sont renvoyés pour 3
+  vraies fiches — soit ~2,3× plus d'appels d'extraction que nécessaire. Les blocs structurels de
+  l'OCR 4 sont demandés et conservés en cache, mais pas encore exploités pour corriger cela. C'est
+  le plus gros gain de coût *et* de temps encore disponible, devant la parallélisation.
+- Le schéma est envoyé deux fois par appel (injecté dans le prompt via `{{ SCHEMA_JSON }}` **et**
+  passé en `response_format`), soit ~12 000 jetons d'entrée par fiche. Redondance assumée : avec le
+  cache de prompt, ces jetons sont facturés 10 % dès la deuxième fiche, si bien que retirer la copie
+  du prompt ne rapporterait plus grand-chose face au risque qualité.
 - Le mode strict de Mistral n'accepte pas `anyOf`, `format`, `uniqueItems`, `$ref`, `oneOf`, `allOf`
   (erreur 400 / code 3051). Ces mots-clés ont été retirés du schéma au profit de `pattern` ;
-  conséquence : les doublons dans `type_valorisation` ne sont plus interdits par le schéma.
-- La segmentation confond encore fiches projet et pages de sommaire : sur l'extrait de 18 pages,
-  7 segments sont renvoyés pour 3 vraies fiches. Les blocs structurels de l'OCR 4 sont demandés mais
-  pas encore exploités pour corriger cela.
+  conséquence : les doublons dans `type_valorisation` ne sont plus interdits par le schéma et devront
+  être dédupliqués dans une couche de normalisation.
 - Pas encore de validation *a posteriori* du JSON renvoyé contre `REX.schema.json` : le mode strict
   empêche les dérives à la génération, mais rien ne le vérifie ni ne le journalise côté application.
-- Aucune persistance : le résultat vit dans `st.session_state` et disparaît au rechargement.
-- Traitement séquentiel des projets — un recueil de 50 fiches enchaîne 50 appels LLM.
-- Le fallback d'affichage du tableau lit `project["presentation"]["titre"]` (minuscules) alors que le
-  schéma produit `Presentation` / `Titre` : ce chemin d'erreur retombe donc sur « Projet N ».
-- Aucun test automatisé.
+  Les colonnes de la base sont prêtes (`fiches.validation_status`), le contrôle reste à écrire.
+- `pipeline.py` et `store.py` n'importent délibérément pas `streamlit`. Ce n'est pas une préférence
+  de style : un thread de travail sans `ScriptRunContext` qui lit `st.session_state` ne reçoit pas
+  d'erreur claire — Streamlit lui sert un état factice **global au processus**, si bien que toutes
+  les fiches échouent identiquement sur un `AttributeError` et que l'interface n'affiche qu'« aucun
+  projet analysé ». Rendre `st` inaccessible dans ces modules empêche ce bug par construction.
+- **L'historique est global et sans authentification.** Sur l'application publique, tout visiteur
+  voit, exporte et peut **supprimer** les documents traités par les autres, et peut importer une
+  archive qui empoisonnerait le cache OCR. Choix assumé pour un usage interne ; un mot de passe
+  (`st.secrets["APP_PASSWORD"]`) en tête de `main()` suffirait à fermer l'accès.
+- `flatten_project_data()` aplatit les sections sur le nom feuille des champs, sans préfixe : deux
+  sections partageant un nom de champ s'écraseraient dans l'export Excel.
+- `st-mui-table` n'a plus de version depuis janvier 2024, et rend dans son propre iframe — d'où le
+  jeu de jetons Material 3 dupliqué en `customCss` dans `app.py`. La refonte d'interface le remplacera
+  par des composants Streamlit natifs.
+- `format_expanded_data()` construit du HTML à la main (échappé, mais à la main) : une refonte
+  pilotée par le schéma éviterait d'avoir à toucher au rendu pour chaque nouveau champ.
+- Les tests sont trois scripts à `assert`, pas une suite `pytest`, et il n'y a pas encore de harnais
+  d'évaluation permettant de dire si un changement de prompt améliore la qualité d'extraction.
 - Les deux PDF d'exemple (10,6 Mo) sont versionnés dans le dépôt.
+- Pas d'exemple de secrets versionné (`.streamlit/secrets.toml.example`).
