@@ -103,13 +103,16 @@ Points de conception notables :
 | `REXPrompt.md` | Prompt système d'**extraction** d'une fiche projet (rôle, format d'entrée page par page, gestion des champs absents → `""`). |
 | `listPrompt.md` | Prompt système de **segmentation** du recueil (identifier l'introduction/annexes, détecter les ruptures, définir `PageDebut`/`PageFin`). |
 | `REX.schema.json` | Modèle de données d'une fiche projet : 10 sections (`Presentation`, `Typologie`, `Enjeux`, `Directives`, `Travaux`, `Contexte`, `Objectif`, `Description`, `Valorisation`, `Documents`) avec descriptions détaillées et **énumérations métier** (23 régions, 11 types d'ingénierie écologique, 43 types de milieux Ramsar, 13 typologies SDAGE, 11 typologies hydrogéomorphologiques Sandre, 53 techniques de génie écologique, 15 enjeux, 17 statuts de protection…). |
-| `REXlist.schema.json` | Modèle de la liste de segments (`Liste[] : Titre, PageDebut, PageFin`). |
+| `REXlist.schema.json` | Modèle de la liste de segments (`PagesHorsProjet[]`, puis `Liste[] : PageDebut, PageFin, Titre, Motif`). L'ordre des propriétés est **l'ordre de génération** en mode strict : les pages hors projet d'abord, et la justification après les bornes de pages — voir *Limites connues*. |
+| `conformite.py` | Normalisation et validation d'une fiche après génération : recalage des valeurs d'énumération approchantes, dédoublonnage des listes, verdict `conforme` / `corrigé` / `non conforme`. N'importe pas `streamlit`. |
+| `vocabulary.json` | Vocabulaire contrôlé hors du code : alias de synonymes, réglages de normalisation. Étendu par la tâche 5 (clés d'export, formats, routage). |
 | `styles.css` | Thème « Material 3 Expressive » eau & biodiversité (variables CSS, en-tête, cartes, uploader, boutons, messages). |
 | `pipeline.py` | Cœur du traitement : client Mistral, construction des requêtes, concurrence, mode par lot, classification des erreurs, comptabilité des jetons. **N'importe pas `streamlit`** (voir *Limites connues*). |
 | `store.py` | Persistance SQLite : cache OCR, historique des traitements, fiches, travaux par lot, export/import d'archive. N'importe pas `streamlit` non plus. |
 | `smoke_test.py` | Vérification en direct de la chaîne Mistral sur l'extrait 18 pages : blocs structurels, conformité au schéma, champs signalés par le client, et **mesure du cache de prompt** (deux fiches consécutives). Options `--fixture` (hors ligne, sans clé) et `--batch` (répétition du mode par lot). |
-| `tests/` | Trois vérifications hors ligne, sans clé API — voir `tests/README.md`. |
-| `requirements.txt` | Dépendances Python épinglées. |
+| `tests/` | Suite `pytest` hors ligne, sans clé API, plus `eval_rex.py` qui note la qualité du découpage — voir `tests/README.md`. |
+| `requirements.txt` | Dépendances Python épinglées (celles du déploiement). |
+| `requirements-dev.txt` | `pytest`, en plus des précédentes. Séparé à dessein : le déploiement n'installe que `requirements.txt`. |
 | `.devcontainer/devcontainer.json` | Dev container / Codespaces : Python 3.11, installation des requirements, lancement automatique de Streamlit sur le port 8501. |
 | `IFD_FICJOINT_0020373.PDF`, `IFD_FICJOINT_0020373-1-18.pdf` | Documents d'exemple servant de jeu de test (le second est un extrait des pages 1 à 18, plus rapide à traiter). |
 
@@ -179,7 +182,15 @@ Pour vérifier la chaîne Mistral sans lancer l'interface (peu coûteux, 18 page
 Et les vérifications qui ne coûtent rien, sans clé API :
 
 ```bash
-.venv/bin/python tests/check_store.py && .venv/bin/python tests/check_concurrence.py && .venv/bin/python tests/check_integration.py
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+Pour mesurer la qualité du découpage — un seul appel `mistral-small-latest`, rejoué depuis la charge
+OCR figée, sans OCR ni extraction — et empiler la note dans `tests/evals/journal.jsonl` :
+
+```bash
+.venv/bin/python tests/eval_rex.py --journal
 ```
 
 ### Historique et stockage
@@ -218,22 +229,57 @@ Développement mené par une seule personne (`da-niezgoda` / `d.niezgoda`), 24 c
 
 ## Limites connues / pistes d'amélioration
 
-- **La segmentation sur-découpe** : sur l'extrait de 18 pages, 7 segments sont renvoyés pour 3
-  vraies fiches — soit ~2,3× plus d'appels d'extraction que nécessaire. Les blocs structurels de
-  l'OCR 4 sont demandés et conservés en cache, mais pas encore exploités pour corriger cela. C'est
-  le plus gros gain de coût *et* de temps encore disponible, devant la parallélisation.
+- **Le sur-découpage est corrigé** : l'extrait de 18 pages renvoyait 7 segments pour 2 vraies fiches,
+  il en renvoie 2, aux bornes exactes (note de découpage 0,444 → 1,000). Ce qui a fait le travail
+  n'est pas la géométrie mais le fait de rendre l'étape d'exclusion **explicite** — le modèle doit
+  désormais énumérer les pages hors projet dans `PagesHorsProjet` au lieu de les « identifier
+  mentalement » — et de nommer dans `listPrompt.md` les cas réels : sommaire, liste des opérations,
+  carte de localisation, et la page de *fiche-type* annotée (une légende de mise en page qui contient
+  un spécimen complet, avec un vrai titre et un vrai montant). Les blocs structurels de l'OCR 4
+  restent demandés et cachés, mais **inutilisés** : aucun besoin de géométrie ne s'est matérialisé.
+- **L'échauffement du cache est sauté en dessous de 3 fiches** (`SEUIL_ECHAUFFEMENT`). Il sérialise le
+  premier appel pour n'économiser 90 % que sur *une* fiche : avec 2 fiches, le run devient entièrement
+  séquentiel pour un gain négligeable. Médiane mesurée sur l'extrait de 18 pages : ~65 s avec
+  échauffement, ~34 s sans. La variance de l'API étant forte (31 à 75 s pour un travail identique),
+  ne concluez jamais sur un seul run.
+- ⚠️ **`PagesHorsProjet` est un outil de raisonnement, pas une donnée : ne rien en déduire.** Sur le
+  recueil complet, le modèle a déclaré 110 pages hors projet — dont 29 à 129 — alors que ses propres
+  segments couvrent 37 à 129 ; le vrai ensemble est {1-9, 29-36}. Il se contredit donc sur un long
+  document, en étendant paresseusement un intervalle au lieu de raisonner page par page. Sans
+  conséquence aujourd'hui, car rien ne le lit (`_segmenter` ne prend que `Liste`), et le champ remplit
+  malgré tout son office : c'est le fait d'**exiger** cette exclusion qui a corrigé le sur-découpage.
+  Mais le recoupement « pages non couvertes = pages déclarées hors projet » ne tient pas à l'échelle.
+- ⚠️ **`Motif` doit rester déclaré APRÈS `PageDebut`/`PageFin`** dans `REXlist.schema.json`. L'ordre
+  des propriétés est l'ordre de génération : en le plaçant avant, le modèle justifiait un segment
+  avant d'avoir choisi ses pages, s'ancrait sur le contenu de la page 4 et donnait aux pages 10-14 le
+  titre et le maître d'ouvrage du spécimen de la légende. Les bornes de pages étaient pourtant
+  parfaites — seul le libellé était contaminé, ce qu'une note de découpage seule ne voit pas (d'où le
+  contrôle de recouvrement de titre dans `eval_rex.py`).
 - Le schéma est envoyé deux fois par appel (injecté dans le prompt via `{{ SCHEMA_JSON }}` **et**
   passé en `response_format`), soit ~12 000 jetons d'entrée par fiche. Redondance assumée : avec le
   cache de prompt, ces jetons sont facturés 10 % dès la deuxième fiche, si bien que retirer la copie
   du prompt ne rapporterait plus grand-chose face au risque qualité.
 - Le mode strict de Mistral n'accepte pas `anyOf`, `format`, `uniqueItems`, `$ref`, `oneOf`, `allOf`
   (erreur 400 / code 3051). Ces mots-clés ont été retirés du schéma au profit de `pattern` ;
-  conséquence : les doublons dans `type_valorisation` ne sont plus interdits par le schéma et devront
-  être dédupliqués dans une couche de normalisation.
-- Pas encore de validation *a posteriori* du JSON renvoyé contre `REX.schema.json` : le mode strict
-  empêche les dérives à la génération, mais rien ne le vérifie ni ne le journalise côté application.
-  Les colonnes de la base sont prêtes (`fiches.validation_status`), le contrôle reste à écrire.
-- `pipeline.py` et `store.py` n'importent délibérément pas `streamlit`. Ce n'est pas une préférence
+  conséquence : les doublons dans `type_valorisation` ne sont plus interdits par le schéma — ils sont
+  dédoublonnés par `conformite.py`, qui préserve l'ordre.
+- **Chaque fiche porte désormais un verdict** (`conforme` / `corrigé` / `non conforme`) dans la base
+  et dans deux colonnes de l'export Excel, avec le journal complet des recalages (`avant`, `après`,
+  règle appliquée). `status` et `validation_status` sont deux axes distincts : une fiche non conforme
+  reste `status='ok'`, sinon elle disparaîtrait précisément de l'écran où un expert doit la corriger.
+- **La normalisation ne recale que sur une correspondance exacte après canonicalisation**, plus une
+  table d'alias tenue à la main. Jamais de distance d'édition : la clé canonique est vérifiée
+  *injective* sur les 204 valeurs d'énumération à chaque exécution des tests, si bien qu'un recalage
+  est une preuve que la sortie du modèle et la valeur métier ne diffèrent que par la casse, les
+  accents, les apostrophes, la ponctuation ou un pluriel. Une valeur non résolue est **laissée telle
+  quelle** et signalée — la couche ne devine pas. `type_genie_ecologique` contient `Fauche`,
+  `Fenaison et pâture` et `Pâturage` : une distance d'édition y corromprait des données expertes sans
+  qu'on puisse dire lesquelles.
+- ⚠️ Deux alias visent `Site Natura 2000`, valeur qui **n'existe pas encore** dans l'énumération
+  `Contexte.contexte`. Ce n'est pas une erreur fatale : le point est signalé dans le popover
+  Maintenance, et la tâche 5 ajoutera la valeur. Un alias mal orthographié, en revanche, fait échouer
+  la suite de tests.
+- `pipeline.py`, `store.py` et `conformite.py` n'importent délibérément pas `streamlit`. Ce n'est pas une préférence
   de style : un thread de travail sans `ScriptRunContext` qui lit `st.session_state` ne reçoit pas
   d'erreur claire — Streamlit lui sert un état factice **global au processus**, si bien que toutes
   les fiches échouent identiquement sur un `AttributeError` et que l'interface n'affiche qu'« aucun
@@ -243,13 +289,21 @@ Développement mené par une seule personne (`da-niezgoda` / `d.niezgoda`), 24 c
   archive qui empoisonnerait le cache OCR. Choix assumé pour un usage interne ; un mot de passe
   (`st.secrets["APP_PASSWORD"]`) en tête de `main()` suffirait à fermer l'accès.
 - `flatten_project_data()` aplatit les sections sur le nom feuille des champs, sans préfixe : deux
-  sections partageant un nom de champ s'écraseraient dans l'export Excel.
+  sections partageant un nom de champ s'écraseraient dans l'export Excel. Les noms nus étant le
+  contrat de colonnes du client, le schéma d'aplatissement est conservé et l'invariant est **verrouillé
+  par un test** — ajouter un doublon fait échouer la suite au lieu de faire disparaître une colonne.
 - `st-mui-table` n'a plus de version depuis janvier 2024, et rend dans son propre iframe — d'où le
   jeu de jetons Material 3 dupliqué en `customCss` dans `app.py`. La refonte d'interface le remplacera
   par des composants Streamlit natifs.
 - `format_expanded_data()` construit du HTML à la main (échappé, mais à la main) : une refonte
   pilotée par le schéma éviterait d'avoir à toucher au rendu pour chaque nouveau champ.
-- Les tests sont trois scripts à `assert`, pas une suite `pytest`, et il n'y a pas encore de harnais
-  d'évaluation permettant de dire si un changement de prompt améliore la qualité d'extraction.
-- Les deux PDF d'exemple (10,6 Mo) sont versionnés dans le dépôt.
+- La note `score_rex_v1` combine **trois** composantes seulement — découpage, conformité, remplissage.
+  La correspondance champ par champ demande une vérité terrain que seuls les experts du client peuvent
+  fournir : `tests/fixtures/verite-18p.json` porte donc `champs: {}`, et le scoreur annonce ce qu'il
+  ne mesure pas. La métrique est **versionnée** plutôt que renormalisée : quand ces étiquettes
+  arriveront elles feront un `v2`, et un v1 ne se compare jamais à un v2.
+- Les deux PDF d'exemple (10,6 Mo) sont versionnés dans le dépôt — ce qui mériterait une décision en
+  soi, s'agissant de documents du client. C'est aussi ce qui justifie de versionner la charge OCR
+  figée de l'extrait : elle ne divulgue rien que le PDF ne divulgue déjà, et elle rend la suite
+  exécutable sur un clone neuf sans clé API.
 - Pas d'exemple de secrets versionné (`.streamlit/secrets.toml.example`).

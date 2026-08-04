@@ -1,0 +1,59 @@
+{
+  "commentaire": [
+    "Vérité terrain du découpage de l'extrait de 18 pages. Numéros de page",
+    "uniquement, aucun contenu du document : ce fichier est versionné.",
+    "",
+    "Établie en lisant les 18 pages de `ocr-18p.json`. Le point à retenir :",
+    "l'extrait contient DEUX fiches réelles, pas trois. La page 4 ressemble à une",
+    "fiche (titre unique, Objectif, Maître d'ouvrage, montant, plan de financement)",
+    "mais c'est la LÉGENDE de mise en page : la page 3 l'annonce explicitement",
+    "(« Une fiche-type : … avec une entête de présentation commune, voir",
+    "ci-après »), et le spécimen est entouré d'étiquettes d'annotation",
+    "(« Département concerné », « Numéro de la fiche », « Type d'action : ",
+    "Préservation / Restauration-Renaturation », « La taille du logo reflète… »).",
+    "Le spécimen est la Fiche R.4, une fiche de RESTAURATION, alors que les deux",
+    "fiches réelles de l'extrait sont P.1 et P.2, en PRÉSERVATION : R.4 se trouve",
+    "ailleurs dans le recueil complet de 129 pages, et l'extraire ici la",
+    "dupliquerait en la mélangeant au texte de la légende.",
+    "",
+    "`champs` est vide à dessein : la vérité par champ demande les experts du",
+    "client. Le scoreur signale la couverture et ignore ce qui n'est pas étiqueté."
+  ],
+  "version": 1,
+  "fichier": "IFD_FICJOINT_0020373-1-18.pdf",
+  "document_sha256": "0e30d2a53fb51103d05b9d6120ad6b5281949680960d3458eb4eef981843c89c",
+  "nb_pages": 18,
+  "fiches_attendues": [
+    {
+      "reference": "Fiche P.1",
+      "titre_indicatif": "Vallée alluviale de la Moselle sauvage de Virecourt à Chamagne",
+      "page_debut": 10,
+      "page_fin": 14
+    },
+    {
+      "reference": "Fiche P.2",
+      "titre_indicatif": "Vallée de la Meurthe de Bertrichamps à Saint Clément",
+      "page_debut": 15,
+      "page_fin": 18
+    }
+  ],
+  "hors_projet": [
+    {
+      "pages": [1, 2, 3],
+      "motif": "introduction : définition d'une zone humide, acteurs, types d'intervention"
+    },
+    {
+      "pages": [4],
+      "motif": "fiche-type annotée : légende de mise en page, annoncée en page 3"
+    },
+    {
+      "pages": [5, 6, 7, 8],
+      "motif": "« Liste des actions décrites » : tableaux de sommaire"
+    },
+    {
+      "pages": [9],
+      "motif": "« Localisation des opérations décrites » : carte"
+    }
+  ],
+  "champs": {}
+}

@@ -14,6 +14,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from st_mui_table import st_mui_table
 
+import conformite
 import pipeline
 import store
 # Réexportés pour que smoke_test.py et l'interface parlent le même vocabulaire
@@ -36,7 +37,7 @@ load_dotenv()
 
 # Clés de session portant les prompts et schémas, vidées par le bouton de
 # rechargement (ils sont chargés une fois par session, pas par rerun).
-CLES_PROMPTS = ("REXSchema", "REXListSchema", "REXPrompt", "listPrompt")
+CLES_PROMPTS = ("REXSchema", "REXListSchema", "REXPrompt", "listPrompt", "vocabulaire")
 
 
 # Configure page
@@ -84,6 +85,23 @@ def load_schema(schema_name):
     except Exception as e:
         st.error(f"Erreur au chargement du schéma {schema_name} : {e}")
         return None
+
+
+def load_vocabulaire(nom="vocabulary.json"):
+    """
+    Vocabulaire contrôlé : alias et réglages de normalisation.
+
+    Absent, il n'empêche rien : la canonicalisation résout déjà la casse, les
+    accents, les apostrophes et les pluriels sans alias. Un fichier illisible est
+    en revanche signalé, parce qu'il changerait silencieusement les recalages.
+    """
+    if not Path(nom).exists():
+        return {}
+    try:
+        return json.loads(load_text_file(*_cle_fichier(nom)))
+    except Exception as e:
+        st.error(f"Erreur au chargement du vocabulaire {nom} : {e}")
+        return {}
 
 
 def load_prompt(prompt_name, schema=None):
@@ -204,9 +222,13 @@ def _contexte_extraction():
     prompt_segmentation = st.session_state.listPrompt
     schema_rex = st.session_state.REXSchema
     schema_liste = st.session_state.REXListSchema
+    vocabulaire = st.session_state.get("vocabulaire") or {}
+    index_conformite, problemes = conformite.construire_index(schema_rex, vocabulaire)
     return {
         "prompt_extraction": prompt_extraction,
         "prompt_segmentation": prompt_segmentation,
+        "index_conformite": index_conformite,
+        "problemes_vocabulaire": problemes,
         "format_extraction": json_schema_format("rex_fiche_projet", schema_rex),
         "format_segmentation": json_schema_format("rex_liste_projets", schema_liste),
         "cle_cache_extraction": pipeline.cle_cache_prompt(
@@ -450,12 +472,13 @@ def parse_pdf_document(file_content, filename, progress_callback=None, mode="rap
                 progress_callback=progress_callback,
             )
 
-        fiches, echecs_extraction, usage_ext = _extraire_en_parallele(
+        fiches, echecs_extraction, usage_ext, bilan = _extraire_en_parallele(
             client, travaux, ctx=ctx, modeles_traces=modeles_traces,
             document_id=document_id, run_id=run_id,
             progress_callback=progress_callback,
         )
         resultat["projects"] = fiches
+        resultat["conformite"] = bilan
         resultat["failures"].extend(echecs_extraction)
         resultat["failures"].sort(key=lambda e: e["index"])
         pipeline.usage_cumuler(usage["extraction"], usage_ext)
@@ -501,6 +524,49 @@ def _persister_echec(run_id, document_id, echec):
     )
 
 
+def _conformer_et_persister(run_id, document_id, index, fiche, *, ctx,
+                            usage=None, statut="ok"):
+    """
+    Normalise, valide, persiste. **Point de passage unique des deux modes.**
+
+    Renvoie la fiche normalisée : les appelants doivent l'utiliser à la place de
+    celle du modèle, faute de quoi l'écran et l'Excel montreraient une valeur que
+    la base ne contient pas.
+
+    La normalisation passe avant la validation, sinon « corrigé » ne serait pas
+    exprimable et les erreurs décriraient un état qui n'est pas celui stocké.
+    """
+    fiche, rapport = conformite.conformer(fiche, ctx["index_conformite"])
+    fiche["_validation_status"] = rapport["statut"]
+    fiche["_validation_resume"] = conformite.resumer(rapport)
+    store.upsert_fiche(
+        run_id, document_id, index, status=statut,
+        titre=fiche.get("_project_title"),
+        page_debut=fiche.get("_page_debut"), page_fin=fiche.get("_page_fin"),
+        data=fiche, model_extraction=fiche.get("_model_extraction"),
+        prompt_hash=fiche.get("_prompt_hash"), usage=usage,
+        validation_status=rapport["statut"],
+        # NULL quand il n'y a rien à dire, pour que
+        # « WHERE validation_errors_json IS NOT NULL » soit la requête utile.
+        validation_errors=rapport if (rapport["erreurs"] or rapport["corrections"]) else None,
+    )
+    return fiche, rapport
+
+
+def _bilan_conformite(rapports):
+    """Compteurs de conformité d'un run, pour le bandeau de fin."""
+    bilan = {statut: 0 for statut in conformite.STATUTS}
+    bilan["recalages"] = 0
+    bilan["par_regle"] = {}
+    for rapport in rapports:
+        bilan[rapport["statut"]] = bilan.get(rapport["statut"], 0) + 1
+        bilan["recalages"] += conformite.compter_recalages(rapport)
+        for correction in rapport.get("corrections") or []:
+            regle = correction["regle"]
+            bilan["par_regle"][regle] = bilan["par_regle"].get(regle, 0) + 1
+    return bilan
+
+
 def _extraire_en_parallele(client, travaux, *, ctx, modeles_traces, document_id,
                            run_id, progress_callback=None):
     """
@@ -513,17 +579,21 @@ def _extraire_en_parallele(client, travaux, *, ctx, modeles_traces, document_id,
     total = len(travaux)
     etat = {"faits": 0, "echecs": 0}
     cle_cache = ctx["cle_cache_extraction"]
+    # Fiches normalisées, indexées par segment. C'est ce qui est renvoyé, à la
+    # place de la liste que le pipeline a bâtie : on ne s'appuie PAS sur le fait
+    # que `on_resultat` reçoive le même objet que celui empilé dans
+    # `pipeline.extraire_fiches`. Cette identité existe bel et bien, mais c'est
+    # exactement le genre de couplage invisible que personne ne retrouve six mois
+    # plus tard — deux lignes suffisent à s'en passer.
+    normalisees, rapports = {}, []
 
     def on_resultat(index, fiche, echec, usage_fiche):
         etat["faits"] += 1
         if fiche is not None:
-            store.upsert_fiche(
-                run_id, document_id, index, status="ok",
-                titre=fiche.get("_project_title"),
-                page_debut=fiche.get("_page_debut"), page_fin=fiche.get("_page_fin"),
-                data=fiche, model_extraction=fiche.get("_model_extraction"),
-                prompt_hash=fiche.get("_prompt_hash"), usage=usage_fiche,
-            )
+            fiche, rapport = _conformer_et_persister(
+                run_id, document_id, index, fiche, ctx=ctx, usage=usage_fiche)
+            normalisees[index] = fiche
+            rapports.append(rapport)
         if echec is not None:
             etat["echecs"] += 1
             _persister_echec(run_id, document_id, echec)
@@ -548,7 +618,10 @@ def _extraire_en_parallele(client, travaux, *, ctx, modeles_traces, document_id,
     _cles_echauffees().add(cle_cache)
     if fiches:
         store.set_run_models(run_id, model_extraction=fiches[0]["_model_extraction"])
-    return fiches, echecs, usage_total
+    # L'ordre document vient du tri de `pipeline.extraire_fiches`; on ne fait que
+    # substituer la version normalisée de chaque fiche.
+    fiches = [normalisees.get(f["_segment_index"], f) for f in fiches]
+    return fiches, echecs, usage_total, _bilan_conformite(rapports)
 
 
 def relancer_fiches(document_id, run_id, indices, progress_callback=None):
@@ -582,7 +655,7 @@ def relancer_fiches(document_id, run_id, indices, progress_callback=None):
 
     ctx = _contexte_extraction()
     modeles_traces = {"ocr": run["model_ocr"], "segmentation": run["model_segmentation"]}
-    fiches, echecs, _ = _extraire_en_parallele(
+    fiches, echecs, _, bilan = _extraire_en_parallele(
         client, retenus, ctx=ctx, modeles_traces=modeles_traces,
         document_id=document_id, run_id=run_id, progress_callback=progress_callback,
     )
@@ -590,7 +663,8 @@ def relancer_fiches(document_id, run_id, indices, progress_callback=None):
         run_id,
         status="termine" if not store.load_failures(run_id) else "partiel",
     )
-    return {"relancees": len(fiches), "encore_en_echec": len(echecs)}
+    return {"relancees": len(fiches), "encore_en_echec": len(echecs),
+            "conformite": bilan}
 
 
 # --- Mode « économique » : API par lot ---------------------------------------
@@ -712,6 +786,11 @@ def _recolter_travail_par_lot(client, travail, enregistre):
     run_id, document_id = enregistre["run_id"], enregistre["document_id"]
     correspondance = json.loads(enregistre["fiche_seq_map_json"] or "{}")
     run = store.get_run(run_id)
+    # Le mode économique n'a pas de liste en session : le verdict n'atteindrait
+    # l'écran qu'au rechargement du run. Il est donc renvoyé dans le bilan de
+    # récolte, pour que le message qui suit la récolte le dise tout de suite.
+    ctx = _contexte_extraction()
+    rapports = []
 
     lignes = []
     sorties = getattr(travail, "outputs", None)
@@ -758,13 +837,19 @@ def _recolter_travail_par_lot(client, travail, enregistre):
                                error=f"JSON invalide : {exc}", categorie="json_invalide")
             continue
         nb_ok += 1
-        store.upsert_fiche(
-            run_id, document_id, seq, status="ok",
-            titre=reference.get("titre"), page_debut=reference.get("page_debut"),
-            page_fin=reference.get("page_fin"), data=fiche,
-            model_extraction=(run or {}).get("model_extraction") or MODEL_EXTRACTION,
-            prompt_hash=(run or {}).get("prompt_extraction_sha256", "")[:16],
-        )
+        # Les colonnes portent la traçabilité que le pipeline injecte en mode
+        # rapide : on la reconstitue ici pour que les deux modes stockent la même
+        # chose, et pour que le point de passage unique puisse la relire.
+        fiche.update({
+            "_project_title": reference.get("titre"),
+            "_page_debut": reference.get("page_debut"),
+            "_page_fin": reference.get("page_fin"),
+            "_segment_index": seq,
+            "_model_extraction": (run or {}).get("model_extraction") or MODEL_EXTRACTION,
+            "_prompt_hash": (run or {}).get("prompt_extraction_sha256", "")[:16],
+        })
+        _, rapport = _conformer_et_persister(run_id, document_id, seq, fiche, ctx=ctx)
+        rapports.append(rapport)
 
     # Un custom_id présent dans les segments mais ABSENT des sorties est lui-même
     # un échec : sans ce contrôle, un fichier de sortie tronqué ferait disparaître
@@ -802,7 +887,8 @@ def _recolter_travail_par_lot(client, travail, enregistre):
 
     return {"statut": str(getattr(travail, "status", "")), "recolte": True,
             "ok": nb_ok, "echecs": nb_echec, "manquants": manquants,
-            "run_id": run_id, "erreurs_travail": message}
+            "run_id": run_id, "erreurs_travail": message,
+            "conformite": _bilan_conformite(rapports)}
 
 
 def process_uploaded_file(file, filename, mode="rapide"):
@@ -865,7 +951,41 @@ def _afficher_bilan(resultat):
 
     if resultat.get("ocr_cache_hit"):
         st.caption("OCR servi depuis le cache : aucun appel OCR facturé.")
+    _afficher_conformite(resultat.get("conformite"))
     _afficher_usage(resultat.get("usage"))
+
+
+def _afficher_conformite(bilan):
+    """
+    Tableau de bord de la dérive. Si les recalages augmentent après une édition de
+    prompt, cela se voit ici — et non six mois plus tard dans un courriel du
+    client.
+    """
+    if not bilan:
+        return
+    total = sum(bilan.get(statut, 0) for statut in conformite.STATUTS)
+    if not total:
+        return
+    morceaux = [f"{bilan.get('conforme', 0)} conforme(s)"]
+    if bilan.get("corrige"):
+        morceaux.append(f"{bilan['corrige']} corrigée(s)")
+    if bilan.get("non_conforme"):
+        morceaux.append(f"{bilan['non_conforme']} non conforme(s)")
+    ligne = " · ".join(morceaux)
+    if bilan.get("recalages"):
+        ligne += f" — {bilan['recalages']} recalage(s) d'énumération"
+    (st.warning if bilan.get("non_conforme") else st.caption)(f"Conformité : {ligne}")
+
+    if bilan.get("par_regle"):
+        with st.popover("Détail des recalages", use_container_width=False):
+            st.caption(
+                "Chaque recalage est une valeur du modèle ramenée à une valeur du "
+                "vocabulaire contrôlé. Une hausse signale une dérive du prompt ou "
+                "du schéma, pas une amélioration."
+            )
+            for regle, n in sorted(bilan["par_regle"].items(),
+                                   key=lambda kv: -kv[1]):
+                st.write(f"- `{regle}` : {n}")
 
 
 def _afficher_usage(usage):
@@ -984,8 +1104,11 @@ def format_expanded_data(doc_data):
                 html_content += f'<div class="field-item"><span class="field-label">Date début:</span><span class="field-value">{_e(enjeux_data["date_debut"])}</span></div>'
             if enjeux_data.get('date_fin'):
                 html_content += f'<div class="field-item"><span class="field-label">Date fin:</span><span class="field-value">{_e(enjeux_data["date_fin"])}</span></div>'
-            if enjeux_data.get('enjeux') and isinstance(enjeux_data['enjeux'], list):
-                html_content += f'<div class="field-item"><span class="field-label">Enjeux:</span><span class="field-value">{_e(", ".join(str(v) for v in enjeux_data["enjeux"]))}</span></div>'
+            # `_e` joint déjà les listes : la pré-jointure d'avant faisait le
+            # travail deux fois et donnait à cette branche un chemin de jointure
+            # différent des trois branches génériques.
+            if enjeux_data.get('enjeux'):
+                html_content += f'<div class="field-item"><span class="field-label">Enjeux:</span><span class="field-value">{_e(enjeux_data["enjeux"])}</span></div>'
             html_content += '</div>'
 
     # Typologie (capitalized key)
@@ -1134,10 +1257,42 @@ SECTIONS = (
 # Métadonnées de traçabilité reportées dans l'export. Les versions de modèle en
 # font partie : elles étaient enregistrées par le pipeline mais n'atteignaient
 # jamais l'Excel, ce qui rendait deux exports incomparables.
+# Le verdict de conformité ferme la liste : c'est ce qui permet au client de
+# trier ou filtrer les lignes à reprendre directement dans le classeur.
 META_EXPORT = (
     '_project_title', '_page_debut', '_page_fin', '_segment_index',
     '_model_ocr', '_model_segmentation', '_model_extraction', '_prompt_hash',
+    '_validation_status', '_validation_resume',
 )
+
+
+def noms_de_feuilles(schema):
+    """Noms de champs feuille du schéma, section par section."""
+    noms = []
+    for section, noeud in (schema.get("properties") or {}).items():
+        for champ in (noeud.get("properties") or {}):
+            noms.append((section, champ))
+    return noms
+
+
+def verifier_unicite_des_feuilles(schema):
+    """
+    Noms de feuille apparaissant dans plus d'une section.
+
+    `flatten_project_data` aplatit sur le nom de feuille NU, sans préfixe de
+    section : deux sections partageant un nom de champ s'écraseraient donc en
+    silence, et une colonne disparaîtrait de l'Excel du client. On ne change pas
+    le schéma d'aplatissement — les noms nus sont le contrat de colonnes du
+    client — on verrouille l'invariant par un test, pour que l'ajout d'un
+    doublon en tâche 5 fasse échouer la suite au lieu de passer inaperçu.
+    """
+    vus, collisions = {}, {}
+    for section, champ in noms_de_feuilles(schema):
+        if champ in vus:
+            collisions.setdefault(champ, [vus[champ]]).append(section)
+        else:
+            vus[champ] = section
+    return collisions
 
 
 def flatten_project_data(project):
@@ -1149,8 +1304,8 @@ def flatten_project_data(project):
     section (type_valorisation, notamment) arrivait brut jusqu'à xlsxwriter et
     ressortait en « ['Document de communications'] », crochets compris.
 
-    Limite connue : les clés sont aplaties à leur nom feuille, sans préfixe de
-    section — deux sections partageant un nom de champ s'écraseraient.
+    Limite connue et verrouillée : les clés sont aplaties à leur nom feuille, sans
+    préfixe de section. Voir `verifier_unicite_des_feuilles`.
     """
     flat_data = {}
     for section in SECTIONS:
@@ -1165,6 +1320,11 @@ def flatten_project_data(project):
     for cle in META_EXPORT:
         if cle in project:
             flat_data[cle] = project[cle]
+    # Rechargé depuis la base, le verdict arrive en JSON brut : le résumé
+    # français est dérivé ici, pour que `store.py` reste un module feuille.
+    if '_validation_resume' not in flat_data and project.get('_validation_errors_json'):
+        flat_data['_validation_resume'] = conformite.resumer_json(
+            project['_validation_errors_json'])
 
     return flat_data
 
@@ -1176,6 +1336,25 @@ def create_excel_download(projects):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='REX')
     return output.getvalue()
+
+
+def _titre_de_fiche(project, index):
+    """
+    Libellé d'une fiche : la trace du pipeline d'abord, le titre extrait ensuite,
+    un rang en dernier recours.
+
+    Extrait d'une branche `except` du tableau, où il était intestable sans
+    Streamlit. Le bug d'origine lisait « presentation » / « titre » en minuscules
+    alors que le schéma produit « Presentation » / « Titre » : la recherche
+    échouait toujours et chaque ligne s'appelait « Projet N », alors que
+    `_project_title` était disponible. Les clés minuscules ne sont volontairement
+    PAS acceptées — elles n'ont jamais existé dans le schéma.
+    """
+    return (
+        project.get("_project_title")
+        or (project.get("Presentation") or {}).get("Titre")
+        or f"Projet {index + 1}"
+    )
 
 
 def _nom_export(filename):
@@ -1218,11 +1397,11 @@ def display_results_table():
 
     # Prepare DataFrame for st_mui_table
     df_data = []
-    for project in projects:
-        titre = project.get("_project_title", "Sans titre")
+    for idx, project in enumerate(projects):
+        titre = _titre_de_fiche(project, idx)
         page_debut = project.get("_page_debut", "N/A")
         page_fin = project.get("_page_fin", "N/A")
-        
+
         df_data.append({
             "Titre du projet": titre,
             "Page début": page_debut,
@@ -1371,16 +1550,10 @@ def display_results_table():
         )
     except Exception as e:
         st.error(f"Erreur d'affichage du tableau : {e}")
-        # Repli sur des composants Streamlit natifs. Il lisait « presentation »
-        # et « titre » en minuscules alors que le schéma produit « Presentation »
-        # / « Titre » : la recherche échouait toujours et chaque ligne
-        # s'appelait « Projet N », alors que _project_title était disponible.
+        # Repli sur des composants Streamlit natifs, avec la même résolution de
+        # titre que le tableau — voir `_titre_de_fiche`.
         for idx, project in enumerate(projects):
-            titre = (
-                project.get("_project_title")
-                or (project.get("Presentation") or {}).get("Titre")
-                or f"Projet {idx + 1}"
-            )
+            titre = _titre_de_fiche(project, idx)
             page_debut = project.get("_page_debut", "N/A")
             page_fin = project.get("_page_fin", "N/A")
 
@@ -1634,17 +1807,31 @@ def _display_maintenance():
     """Rechargement des prompts et des schémas depuis le disque."""
     with st.popover("⚙️ Maintenance"):
         st.caption(
-            "Recharge les prompts Markdown et les schémas JSON depuis le disque. "
-            "Nécessaire après avoir édité REXPrompt.md, listPrompt.md, "
-            "REX.schema.json ou REXlist.schema.json : ils sont chargés une fois "
-            "par session, donc un simple rerun ne suffit pas."
+            "Recharge les prompts Markdown, les schémas JSON et le vocabulaire "
+            "depuis le disque. Nécessaire après avoir édité REXPrompt.md, "
+            "listPrompt.md, REX.schema.json, REXlist.schema.json ou "
+            "vocabulary.json : ils sont chargés une fois par session, donc un "
+            "simple rerun ne suffit pas."
         )
         if st.button("♻️ Recharger prompts et schémas", key="recharger_prompts"):
             for cle in CLES_PROMPTS:
                 st.session_state.pop(cle, None)
             load_text_file.clear()
-            st.toast("Prompts et schémas rechargés")
+            st.toast("Prompts, schémas et vocabulaire rechargés")
             st.rerun()
+
+        # Un alias qui vise une valeur absente de l'énumération n'est pas une
+        # erreur fatale — « Site Natura 2000 » n'existe pas encore dans
+        # Contexte.contexte, et c'est la tâche 5 qui l'ajoutera. Mais il ne doit
+        # pas rester invisible, sinon un alias mal orthographié ne se recale
+        # jamais sans que personne ne le sache.
+        problemes = conformite.construire_index(
+            st.session_state.REXSchema, st.session_state.get("vocabulaire") or {})[1]
+        if problemes:
+            st.warning("Vocabulaire — " + str(len(problemes)) + " point(s) à revoir :")
+            for probleme in problemes:
+                st.caption(f"• {probleme}")
+
         st.caption(f"Base d'historique : `{store.db_path() or get_db_path()}`")
 
 
@@ -1681,6 +1868,12 @@ def _charger_prompts_et_schemas():
         if not st.session_state.listPrompt:
             st.error("Chargement de listPrompt.md impossible.")
             st.stop()
+
+    # Absent ou vide, le vocabulaire n'empêche rien : la canonicalisation résout
+    # déjà la casse, les accents, les apostrophes et les pluriels sans alias. Pas
+    # de st.stop() donc.
+    if 'vocabulaire' not in st.session_state:
+        st.session_state.vocabulaire = load_vocabulaire()
 
 
 def main():

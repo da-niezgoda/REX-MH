@@ -1,0 +1,5 @@
+# Configuration de pytest uniquement. Ce dépôt n'est pas un paquet installable :
+# pas de [build-system], pas de [project]. Le déploiement lit `requirements.txt`.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"

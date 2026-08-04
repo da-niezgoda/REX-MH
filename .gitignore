@@ -15,13 +15,27 @@ data/
 *.db-wal
 *.db-shm
 
-# Charges OCR figées : sortie analysée d'un vrai document. À regénérer avec
-# `smoke_test.py --figer-fixture`. La tâche 3 décidera si elles doivent être
-# versionnées et sous quelle forme.
-tests/fixtures/
+# Charges OCR figées : sortie analysée d'un vrai document, donc ignorées par
+# défaut. Deux exceptions versionnées, décidées en tâche 3 : l'extrait de
+# 18 pages et sa vérité terrain. Le PDF source est lui-même dans le dépôt, donc
+# figer son OCR ne divulgue rien de plus — et c'est ce qui rend toute la suite
+# hors ligne exécutable sur un clone neuf, sans clé API. Tout autre recueil
+# réel reste exclu : ajoutez une exception explicite, jamais un dossier entier.
+tests/fixtures/*
+!tests/fixtures/ocr-18p.json
+!tests/fixtures/verite-18p.json
+
+# Sorties brutes de segmentation : elles portent les titres réels des projets.
+# `journal.jsonl` ne contient que des nombres et reste versionné, pour qu'un
+# changement de prompt montre son delta de score dans le diff.
+tests/evals/seg-*.json
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Couverture de tests (artefact local, régénéré par `coverage run`)
+.coverage
+htmlcov/

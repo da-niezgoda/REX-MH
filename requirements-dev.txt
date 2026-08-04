@@ -1,0 +1,8 @@
+# Dépendances de développement. Volontairement séparées de `requirements.txt`,
+# que le déploiement installe : pytest n'a rien à faire en production.
+#
+#   .venv/bin/pip install -r requirements-dev.txt
+#   .venv/bin/python -m pytest
+-r requirements.txt
+pytest==8.4.2
+coverage==7.10.7

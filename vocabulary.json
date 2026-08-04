@@ -1,0 +1,47 @@
+{
+  "commentaire": [
+    "Vocabulaire contrôlé, en dehors du code. Créé en tâche 3 avec la seule",
+    "section « alias » ; la tâche 5 l'étendra (clés d'export type_valorisation,",
+    "règles de format, routage de Contexte.contexte vers Contexte.autres).",
+    "",
+    "Les clés sont des CHEMINS de schéma « Section/champ », jamais des noms de",
+    "champ nus : deux sections pourraient porter le même nom de feuille.",
+    "",
+    "Les alias ne servent qu'aux vrais synonymes. Tout ce qui ne diffère que par",
+    "la casse, les accents, les apostrophes, la ponctuation, les espaces, un",
+    "pluriel ou un code Ramsar se résout SANS alias — voir `conformite.canoniser`.",
+    "N'ajoutez donc ici que ce que la canonicalisation ne peut pas atteindre.",
+    "",
+    "Table tenue COURTE à dessein. Un alias est une affirmation métier, et le",
+    "vocabulaire vient des experts du client : n'y inscrivez que des variantes de",
+    "surface. « ZNIEFF » -> « Espace Naturel Sensible » ou « Non renseigné » ->",
+    "« N/A » ont été écartés pour cette raison : ce sont des désignations",
+    "distinctes, pas des orthographes distinctes."
+  ],
+  "version": 1,
+
+  "alias": {
+    "Contexte/contexte": {
+      "Natura 2000": "Site Natura 2000",
+      "Zone Natura 2000": "Site Natura 2000"
+    },
+    "Directives/milieux_masse_eau_dce": {
+      "NA": "N/A",
+      "Sans objet": "N/A"
+    },
+    "Directives/milieu_rattache_masse_eau": {
+      "NA": "N/A",
+      "Sans objet": "N/A"
+    },
+    "Directives/milieux_perimetre_directive_oiseaux_habitats": {
+      "NA": "N/A",
+      "Sans objet": "N/A"
+    }
+  },
+
+  "tiers_desactives": {},
+
+  "regles": {},
+
+  "routage": {}
+}

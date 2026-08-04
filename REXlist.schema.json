@@ -4,30 +4,44 @@
   "description": "Schéma pour extraire la liste des projets d'un document",
   "type": "object",
   "properties": {
+    "PagesHorsProjet": {
+      "type": "array",
+      "description": "Numéros des pages qui n'appartiennent à AUCUN projet : introduction, sommaire, listes récapitulatives, cartes de localisation, fiche-type ou légende, annexes. Déclaré avant « Liste » à dessein : écarter ces pages est la première étape, et l'énumérer explicitement évite de promouvoir une page hors projet en projet.",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
     "Liste": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "Titre": {
-            "type": "string",
-            "description": "Le titre du projet"
-          },
           "PageDebut": {
             "type": "integer",
             "description": "La première page traitant du projet",
-            "minimum": 0
+            "minimum": 1
           },
           "PageFin": {
             "type": "integer",
             "description": "La dernière page traitant du projet",
-            "minimum": 0
+            "minimum": 1
+          },
+          "Titre": {
+            "type": "string",
+            "description": "Le titre du projet, puisé dans les pages du segment lui-même (entre PageDebut et PageFin incluses) et nulle part ailleurs."
+          },
+          "Motif": {
+            "type": "string",
+            "description": "En une phrase, ce qui prouve que CES pages décrivent un projet réel : le site nommé, le maître d'ouvrage, le numéro de fiche. Rédigé APRÈS les numéros de page, à dessein : la preuve doit être tirée des pages déjà retenues, et non l'inverse.",
+            "maxLength": 160
           }
         },
         "required": [
-          "Titre",
           "PageDebut",
-          "PageFin"
+          "PageFin",
+          "Titre",
+          "Motif"
         ],
         "additionalProperties": false
       },
@@ -35,6 +49,7 @@
     }
   },
   "required": [
+    "PagesHorsProjet",
     "Liste"
   ],
   "additionalProperties": false

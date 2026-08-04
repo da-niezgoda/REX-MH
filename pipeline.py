@@ -61,6 +61,19 @@ OCR_PARAMS = {
 # quota sans gagner de temps de mur.
 MAX_CONCURRENCE_EXTRACTION = 4
 
+# En dessous de ce nombre de fiches, on n'échauffe PAS le cache de prompt.
+#
+# L'échauffement sérialise le premier appel. Avec 2 fiches, cela rend le run
+# entièrement séquentiel — mesuré sur l'extrait de 18 pages : 68 s avec
+# échauffement contre 32 s sans, pour économiser 90 % des ~11 700 jetons de
+# prompt d'UNE seule fiche. Doubler l'attente pour si peu est un mauvais échange ;
+# à partir de 3 fiches, le gain croît en (N-1) et l'échauffement redevient payant.
+#
+# Contrepartie assumée : c'est l'appel d'échauffement qui porte `lever_bugs=True`,
+# donc en dessous du seuil un bug de notre code est payé sur 2 appels au lieu
+# d'1. À ce volume, c'est négligeable.
+SEUIL_ECHAUFFEMENT = 3
+
 # Le SDK retombe sur 300 s par opération quand timeout_ms n'est pas passé. Avec
 # 4 workers, UN appel pendu immobiliserait 25 % du débit pendant cinq minutes.
 TIMEOUT_UPLOAD_MS = 180_000        # 9,4 Mo à téléverser
@@ -459,8 +472,13 @@ def valider_segment(segment, nb_pages):
 
     Corrige le `if not start_page` de la version précédente, qui confondait
     PageDebut == 0 avec une clé absente et abandonnait la fiche dans un print()
-    vers la sortie du serveur. `REXlist.schema.json` n'impose pas de `minimum`,
-    donc le modèle peut légalement émettre 0.
+    vers la sortie du serveur.
+
+    `REXlist.schema.json` impose désormais `minimum: 1`, mais on revérifie ici :
+    le mode strict n'est pas une garantie sur laquelle miser une fiche, et cette
+    fonction est aussi appelée sur des segments relus depuis
+    `runs.segmentation_json`, donc écrits sous une version antérieure du schéma
+    — qui admettait 0.
     """
     debut, fin = segment.get("PageDebut"), segment.get("PageFin")
     if debut is None or fin is None:
@@ -581,7 +599,8 @@ def extraire_fiches(client, travaux, *, prompt_systeme, response_format,
     simultanément, aucun n'a encore écrit le préfixe et **les N manquent**. On
     envoie donc la première fiche seule, puis on éventaille le reste. Le coût de
     l'échauffement est une latence (~10-30 s), le gain est (N-1) × 90 % sur
-    ~8 800 jetons de prompt.
+    ~8 800 jetons de prompt — donc nul pour N = 1 et faible pour N = 2, d'où
+    `SEUIL_ECHAUFFEMENT`.
 
     Si l'échauffement échoue sur un problème d'API (429, timeout…), on n'arrête
     PAS le run : l'échec est enregistré (donc réessayable) et le reste part quand
@@ -607,6 +626,9 @@ def extraire_fiches(client, travaux, *, prompt_systeme, response_format,
             on_resultat(index, fiche, echec, usage)
 
     restants = list(travaux)
+    # Trop peu de fiches pour amortir la sérialisation : voir SEUIL_ECHAUFFEMENT.
+    if len(restants) < SEUIL_ECHAUFFEMENT:
+        deja_echauffe = True
     if restants and not deja_echauffe:
         encaisser(extraire_une_fiche(
             client, restants.pop(0), prompt_systeme=prompt_systeme,

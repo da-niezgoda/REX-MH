@@ -62,6 +62,18 @@ _STATUTS_RUN = ("en_cours", "termine", "partiel", "echec")
 _MODES = ("rapide", "economique")
 _STATUTS_FICHE = ("ok", "echec", "en_attente")
 
+# Verdict de conformité, écrit par `conformite.conformer`. NULL = non évalué, ce
+# qui couvre les lignes `en_attente` d'un lot et toutes celles d'avant la tâche 3.
+#
+# `status` et `validation_status` sont deux axes ORTHOGONAUX, et les confondre
+# cacherait précisément les lignes qu'un expert doit corriger :
+#   · status            — l'appel a-t-il rendu du JSON exploitable ? (plomberie)
+#   · validation_status — ce JSON est-il conforme au schéma ?        (qualité)
+# Une fiche non conforme reste donc `status='ok'` : `load_run_as_parsed_data` ne
+# retient que les « ok », et tout autre statut la ferait disparaître du tableau,
+# de l'export Excel et du rechargement.
+_STATUTS_VALIDATION = ("conforme", "corrige", "non_conforme")
+
 _LOCK = threading.RLock()
 _DB_PATH = None
 _INITIALISED = False
@@ -134,7 +146,8 @@ CREATE TABLE IF NOT EXISTS fiches (
     prompt_tokens          INTEGER,
     cached_tokens          INTEGER,
     completion_tokens      INTEGER,
-    validation_status      TEXT,
+    validation_status      TEXT    CHECK (validation_status IS NULL OR
+                                          validation_status IN ('conforme','corrige','non_conforme')),
     validation_errors_json TEXT,
     created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
@@ -629,20 +642,34 @@ def upsert_fiche(
     model_extraction=None,
     prompt_hash=None,
     usage=None,
+    validation_status=None,
+    validation_errors=None,
 ):
     """
     Écrit ou réécrit la fiche `seq` de ce run. Idempotent grâce à
     UNIQUE(run_id, seq) : c'est ce qui rend « relancer les fiches en échec » et
     « ré-extraire cette fiche » possibles sans dupliquer de lignes.
 
-    Les six clés préfixées par « _ » que le pipeline injecte ne sont PAS
-    stockées dans data_json : elles vivent en colonnes et sont réinjectées à la
-    lecture. `REX.schema.json` a additionalProperties: false à la racine, donc
-    une fiche qui les transporterait serait rejetée par la validation de la
-    tâche 3.
+    Les dix clés préfixées par « _ » que le pipeline et la couche de conformité
+    injectent ne sont PAS stockées dans data_json : elles vivent en colonnes et
+    sont réinjectées à la lecture. `REX.schema.json` a additionalProperties: false
+    à la racine, donc une fiche qui les transporterait serait rejetée par la
+    validation.
+
+    `validation_errors` prend le DICT de rapport, pas une chaîne : la
+    sérialisation se fait ici, comme pour `data`, afin que deux appelants ne
+    puissent pas diverger sur `ensure_ascii`.
+
+    Les deux colonnes de verdict sont écrites INCONDITIONNELLEMENT, jamais
+    COALESCE'ées. Un appelant qui ne passe pas de verdict remet donc la colonne à
+    NULL au lieu d'en conserver un périmé — c'est ce qui compte lors d'une relance
+    ou quand la récolte d'un lot réécrit une ligne `en_attente` : le verdict doit
+    décrire le `data_json` présent, pas un précédent.
     """
     if status not in _STATUTS_FICHE:
         raise ValueError(f"statut de fiche inconnu : {status!r}")
+    if validation_status is not None and validation_status not in _STATUTS_VALIDATION:
+        raise ValueError(f"statut de validation inconnu : {validation_status!r}")
     usage = usage or {}
     propre = None
     if data is not None:
@@ -650,14 +677,17 @@ def upsert_fiche(
             {k: v for k, v in data.items() if not k.startswith("_")},
             ensure_ascii=False,
         )
+    verdict = (json.dumps(validation_errors, ensure_ascii=False)
+               if validation_errors else None)
     with _connect(write=True) as con:
         con.execute(
             """
             INSERT INTO fiches (run_id, document_id, seq, titre, page_debut, page_fin,
                                 status, data_json, error, categorie, model_extraction,
                                 prompt_hash, prompt_tokens, cached_tokens,
-                                completion_tokens)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                completion_tokens, validation_status,
+                                validation_errors_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id, seq) DO UPDATE SET
                 titre = excluded.titre,
                 page_debut = excluded.page_debut,
@@ -671,6 +701,8 @@ def upsert_fiche(
                 prompt_tokens = excluded.prompt_tokens,
                 cached_tokens = excluded.cached_tokens,
                 completion_tokens = excluded.completion_tokens,
+                validation_status = excluded.validation_status,
+                validation_errors_json = excluded.validation_errors_json,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
             """,
             (
@@ -689,6 +721,8 @@ def upsert_fiche(
                 usage.get("prompt_tokens"),
                 usage.get("cached_tokens"),
                 usage.get("completion_tokens"),
+                validation_status,
+                verdict,
             ),
         )
 
@@ -733,6 +767,10 @@ def load_run_as_parsed_data(run_id):
         data["_model_segmentation"] = run["model_segmentation"]
         data["_model_extraction"] = fiche["model_extraction"] or run["model_extraction"]
         data["_prompt_hash"] = fiche["prompt_hash"]
+        # Verdict brut : le résumé français est dérivé dans `app.py`, pour que
+        # `store.py` reste un module feuille et n'importe pas `conformite`.
+        data["_validation_status"] = fiche["validation_status"]
+        data["_validation_errors_json"] = fiche["validation_errors_json"]
         projects.append(data)
     return {
         "filename": run["filename"],
@@ -933,7 +971,8 @@ def export_bundle(include_ocr=True, mistralai_version=None):
                 SELECT r.uid AS run_uid, f.seq, f.titre, f.page_debut, f.page_fin,
                        f.status, f.data_json, f.error, f.categorie,
                        f.model_extraction, f.prompt_hash, f.prompt_tokens,
-                       f.cached_tokens, f.completion_tokens
+                       f.cached_tokens, f.completion_tokens,
+                       f.validation_status, f.validation_errors_json
                   FROM fiches f JOIN runs r ON r.id = f.run_id
                  ORDER BY f.run_id, f.seq
                 """
@@ -1059,6 +1098,14 @@ def import_bundle(archive_bytes, on_conflict="ignorer"):
             if fiche.get("status") not in _STATUTS_FICHE:
                 raise BundleInvalide(
                     f"statut de fiche invalide : {fiche.get('status')!r}"
+                )
+            # `import_bundle` insère en SQL direct, sans passer par `upsert_fiche`,
+            # donc son garde-fou ne s'applique pas ici : une archive pourrait
+            # planter un verdict arbitraire dans la base.
+            verdict = fiche.get("validation_status")
+            if verdict is not None and verdict not in _STATUTS_VALIDATION:
+                raise BundleInvalide(
+                    f"statut de validation invalide : {verdict!r}"
                 )
 
         charges_ocr = {}
@@ -1188,8 +1235,9 @@ def import_bundle(archive_bytes, on_conflict="ignorer"):
                     INSERT INTO fiches (run_id, document_id, seq, titre, page_debut,
                                         page_fin, status, data_json, error, categorie,
                                         model_extraction, prompt_hash, prompt_tokens,
-                                        cached_tokens, completion_tokens)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        cached_tokens, completion_tokens,
+                                        validation_status, validation_errors_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(run_id, seq) DO NOTHING
                     """,
                     (
@@ -1208,6 +1256,8 @@ def import_bundle(archive_bytes, on_conflict="ignorer"):
                         fiche.get("prompt_tokens"),
                         fiche.get("cached_tokens"),
                         fiche.get("completion_tokens"),
+                        fiche.get("validation_status"),
+                        fiche.get("validation_errors_json"),
                     ),
                 )
                 rapport["fiches_ajoutees"] += 1
