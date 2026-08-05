@@ -138,15 +138,21 @@ def test_titre_minuscule_non_accepte():
     assert app._titre_de_fiche({"presentation": {"titre": "X"}}, 0) == "Projet 1"
 
 
-# --- Rendu HTML --------------------------------------------------------------
+# --- Rendu natif du détail (blocs_de_fiche, pur et testable) -----------------
+#
+# `rendre_fiche` émet des st.* et n'est pas testable hors Streamlit ; toute la
+# logique vit dans `blocs_de_fiche`, pure, qu'on vérifie ici. L'inversion clé de
+# la tâche 4 : le rendu natif échappe tout seul, donc la DONNÉE garde le texte
+# verbatim au lieu d'être pré-échappée à la main (_e/_url ont disparu).
+
+
+def _textes_de(blocs):
+    """(libellé, texte) de tous les champs de tous les blocs."""
+    return [(lib, txt) for _, _, champs in blocs for lib, txt, _ in champs]
 
 
 def test_toutes_les_sections_se_rendent(schema_rex):
-    """
-    `format_expanded_data` masque une section dont tous les champs sont vides
-    (`if value and value != ""`). Avec une fiche « minimale », 5 des 10 blocs
-    n'étaient donc jamais rendus — donc jamais vérifiés échappés. On remplit tout.
-    """
+    """Toute section non vide produit un bloc titré ; piloté par le schéma."""
     fiche = fiche_conforme(schema_rex, taille_tableau=2)
     remplissage = {
         "Presentation/Titre": "Marais de Villiers",
@@ -172,28 +178,65 @@ def test_toutes_les_sections_se_rendent(schema_rex):
         if champ in (schema_rex["properties"][section]["properties"]):
             fiche[section][champ] = valeur
 
-    rendu = app.format_expanded_data(fiche)
-    for titre in ("Objectif", "Résumé", "Autres", "Surface des travaux",
-                  "Pages à extraire", "Recueil complet"):
-        assert titre in rendu, f"bloc « {titre} » absent du rendu"
-    # Tout ce qui est interpolé reste échappé, y compris dans les blocs qui
-    # n'étaient jamais exercés.
-    assert "<la>" not in rendu and "&lt;la&gt;" in rendu
-    assert "<de>" not in rendu and "&lt;de&gt;" in rendu
-    assert "&amp; Cie" in rendu
+    blocs = app.blocs_de_fiche(fiche)
+    titres = {titre for _, titre, _ in blocs}
+    for attendu in ("Objectif du maître d'ouvrage", "Description",
+                    "Contexte réglementaire", "Période et envergure des travaux",
+                    "Documents"):
+        assert attendu in titres, f"bloc « {attendu} » absent"
+
+    libelles = {lib for lib, _ in _textes_de(blocs)}
+    for attendu in ("Objectifs", "Résumé", "Autres", "Surface des travaux",
+                    "Pages à extraire", "Recueil complet"):
+        assert attendu in libelles, f"libellé « {attendu} » absent"
+
+    # Le texte reste VERBATIM : l'échappement est celui, natif, de st.markdown.
+    textes = {txt for _, txt in _textes_de(blocs)}
+    assert "Restaurer <la> tourbière" in textes
+    assert "OiEau & Cie" in textes
+
+
+def test_champ_url_marque_comme_lien(schema_rex):
+    """Un champ d'URL http(s) est marqué « lien » ; le reste ne l'est pas."""
+    fiche = fiche_conforme(schema_rex, taille_tableau=2)
+    fiche["Documents"]["recueil_complet"] = "https://example.org/recueil"
+    liens = {
+        lib: est_lien
+        for _, _, champs in app.blocs_de_fiche(fiche)
+        for lib, _, est_lien in champs
+    }
+    assert liens.get("Recueil complet") is True
+
+
+def test_libelle_champ_repli_sur_la_cle():
+    """Un champ hors LIBELLES retombe sur une version « jolie » de sa clé."""
+    assert app._libelle_champ("Presentation", "Titre") == "Titre"
+    assert app._libelle_champ("Xxx", "type_genie_ecologique") == "Type genie ecologique"
+
+
+def test_valeur_affichable_joint_les_listes():
+    assert app._valeur_affichable(["a", "b", "c"]) == "a, b, c"
+    assert app._valeur_affichable(["a", "", None, "b"]) == "a, b"
+    assert app._valeur_affichable(None) == ""
+
+
+def test_resume_tronque_a_500(schema_rex):
+    """Le résumé long est coupé à 500 caractères + « … »."""
+    fiche = fiche_conforme(schema_rex, taille_tableau=2)
+    fiche["Description"]["resume"] = "x" * 800
+    textes = {txt for _, _, champs in app.blocs_de_fiche(fiche) for _, txt, _ in champs}
+    resume = next(t for t in textes if t.startswith("xxx"))
+    assert len(resume) == 501 and resume.endswith("…")
 
 
 def test_fiche_vide_ne_rend_rien():
-    assert app.format_expanded_data({}) == "Aucune donnée disponible"
-    assert app.format_expanded_data(None) == "Aucune donnée disponible"
+    assert app.blocs_de_fiche({}) == []
+    assert app.blocs_de_fiche(None) == []
 
 
 def test_enjeux_jointes_par_un_seul_chemin(schema_rex):
-    """
-    La branche Enjeux pré-joignait sa liste avant de la passer à `_e`, qui joint
-    déjà : deux chemins de jointure pour un même besoin. Un seul désormais.
-    """
+    """Une liste (enjeux) est jointe par « , » — dans toutes les sections."""
     fiche = fiche_conforme(schema_rex, taille_tableau=2)
     attendu = ", ".join(fiche["Enjeux"]["enjeux"])
-    rendu = app.format_expanded_data(fiche)
-    assert attendu in rendu
+    textes = {txt for _, _, champs in app.blocs_de_fiche(fiche) for _, txt, _ in champs}
+    assert attendu in textes

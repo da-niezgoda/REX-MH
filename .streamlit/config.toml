@@ -1,0 +1,39 @@
+# Thème natif M3 « Eau & Biodiversité » (tâche 4).
+#
+# Remplace la feuille de style injectée : le thème natif atteint TOUS les widgets
+# Streamlit — boutons, champs, expanders, st.dataframe — sans iframe ni CSS
+# dupliquée. Les valeurs viennent des jetons M3 de styles.css (bloc :root).
+# secrets.toml reste le seul fichier .streamlit ignoré par git.
+#
+# Police : « sans-serif » (pile système) et non Roboto. Charger Roboto
+# demanderait un [[theme.fontFaces]] pointant un woff2 externe — dépendance
+# réseau fragile pour une application cliente, qui retomberait en dev hors ligne.
+# L'écart visuel avec une sans-serif propre est mineur ; Roboto reste ajoutable
+# en quelques lignes si besoin.
+
+[theme]
+base = "light"
+primaryColor = "#006A6B"            # Primary — Deep Ocean
+backgroundColor = "#FAFDFC"         # surface
+secondaryBackgroundColor = "#E6EBEB"  # surface-container (widgets, sidebar)
+textColor = "#191C1C"               # on-surface
+linkColor = "#00838F"               # tertiary — Fresh Water
+borderColor = "#BEC8C8"             # outline-variant
+font = "sans-serif"
+headingFont = "sans-serif"
+baseRadius = "0.75rem"              # ≈ M3 --radius-small (12px) : cartes, champs
+buttonRadius = "full"               # boutons pilule (M3)
+showWidgetBorder = true             # rendu « outlined » M3
+showSidebarBorder = true
+dataframeHeaderBackgroundColor = "#E6EBEB"
+dataframeBorderColor = "#BEC8C8"
+
+[theme.dark]
+primaryColor = "#5ED4D6"            # teinte claire pour fond sombre (M3 inverse)
+backgroundColor = "#0F1515"
+secondaryBackgroundColor = "#1A2323"
+textColor = "#E0E6E5"
+linkColor = "#5ED4D6"
+borderColor = "#3A4746"
+dataframeHeaderBackgroundColor = "#1A2323"
+dataframeBorderColor = "#3A4746"

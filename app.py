@@ -1,6 +1,5 @@
 
 import functools
-import html
 import json
 import os
 from datetime import datetime
@@ -10,7 +9,6 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from st_mui_table import st_mui_table
 
 import conformite
 import pipeline
@@ -64,13 +62,9 @@ def _cle_fichier(path):
     return str(path), os.path.getmtime(path)
 
 
-def load_css(file):
-    """Injecte la feuille de style. Le fichier n'est relu qu'après édition."""
-    st.html(f"<style>{load_text_file(*_cle_fichier(file))}</style>")
-
-
-css_path = "styles.css"
-load_css(css_path)
+# Le thème vit désormais dans .streamlit/config.toml (tâche 4), atteint tous les
+# widgets natifs sans iframe, et remplace la feuille de style injectée. Plus de
+# load_css ni de styles.css : une seule source de vérité pour l'apparence.
 
 
 def load_schema(schema_name):
@@ -435,187 +429,142 @@ def _afficher_usage(usage):
 
 
 def display_dashboard():
-    """Display dashboard header"""
-    st.markdown("""
-    <div class="main-header">
-        <h1>🌿 REX Zones Humides</h1>
-        <h4>Extraction de retours d'expérience depuis PDF</h4>
-    </div>
-    """, unsafe_allow_html=True)
+    """En-tête de l'application, en éléments natifs (plus de bannière HTML)."""
+    st.title("🌿 REX Zones Humides")
+    st.caption("Extraction de retours d'expérience depuis un recueil PDF")
 
 
 
-def _e(valeur):
+SECTION_META = {
+    "Presentation": ("📋", "Informations du projet"),
+    "Objectif": ("🎯", "Objectif du maître d'ouvrage"),
+    "Description": ("📝", "Description"),
+    "Enjeux": ("🌱", "Enjeux eau, biodiversité et climat"),
+    "Typologie": ("🔧", "Typologie — ingénierie écologique"),
+    "Directives": ("🇪🇺", "Référence directives européennes"),
+    "Contexte": ("⚖️", "Contexte réglementaire"),
+    "Valorisation": ("🏆", "Valorisation de l'opération"),
+    "Travaux": ("🗺️", "Période et envergure des travaux"),
+    "Documents": ("📚", "Documents"),
+}
+
+# Libellés d'affichage, par « Section/champ ». La STRUCTURE et l'ORDRE viennent
+# du schéma (SECTIONS + REX.schema.json) ; seuls les libellés humains vivent ici,
+# HORS du schéma — les y mettre alourdirait le prompt et déplacerait
+# prompt_cache_key. Un champ absent retombe sur une version « jolie » de sa clé,
+# si bien qu'un nouveau champ du schéma s'affiche sans toucher au moteur de rendu.
+LIBELLES = {
+    "Presentation/Titre": "Titre",
+    "Presentation/Bassin": "Bassin",
+    "Presentation/Nom de l'organisme": "Nom de l'organisme",
+    "Presentation/Localisation": "Localisation",
+    "Presentation/Adresse précise": "Adresse précise",
+    "Presentation/Région": "Région",
+    "Objectif/objectifs": "Objectifs",
+    "Description/resume": "Résumé",
+    "Description/publication_recueil": "Publication",
+    "Enjeux/date_debut": "Date de début",
+    "Enjeux/date_fin": "Date de fin",
+    "Enjeux/enjeux": "Enjeux",
+    "Contexte/contexte": "Contexte",
+    "Contexte/autres": "Autres",
+    "Travaux/surface_travaux": "Surface des travaux",
+    "Documents/pages_extraire": "Pages à extraire",
+    "Documents/recueil_complet": "Recueil complet",
+}
+
+# Champs porteurs d'une URL : rendus en lien natif s'ils sont http(s).
+CHAMPS_URL = {"Valorisation/url", "Documents/recueil_complet"}
+
+# Verdict de conformité → libellé pour la colonne du tableau de résultats.
+_VERDICT_LIBELLE = {
+    "conforme": "✅ Conforme",
+    "corrige": "✏️ Corrigé",
+    "non_conforme": "⚠️ Non conforme",
+}
+
+
+def _libelle_verdict(statut):
+    return _VERDICT_LIBELLE.get(statut, "—")
+
+
+def _libelle_champ(section, champ):
+    """Libellé humain d'un champ : LIBELLES, sinon la clé « jolie » (repli)."""
+    return LIBELLES.get(f"{section}/{champ}") or champ.replace("_", " ").capitalize()
+
+
+def _valeur_affichable(valeur):
     """
-    Valeur prête à être interpolée dans du HTML.
+    Texte affichable d'une valeur de champ.
 
-    `format_expanded_data` construit une chaîne HTML consommée avec
-    unsafe_allow_html : sans échappement, un champ contenant « <script> » — venu
-    de l'OCR, ou d'une archive d'historique réimportée — devient du balisage
-    actif. Les listes sont jointes ici : uniqueItems ayant été retiré du schéma,
-    un tableau peut apparaître dans n'importe quelle section.
+    Les listes sont jointes par « , » — uniqueItems ayant été retiré du schéma,
+    un tableau peut apparaître dans n'importe quelle section. Aucun échappement
+    ici : le rendu natif (st.markdown sans unsafe_allow_html) n'exécute pas le
+    HTML, donc un « <script> » venu de l'OCR ou d'une archive s'affiche en texte.
+    C'est ce qui remplace les anciens _e()/_url().
     """
     if valeur is None:
         return ""
     if isinstance(valeur, (list, tuple)):
-        return html.escape(", ".join(str(v) for v in valeur))
-    return html.escape(str(valeur))
+        return ", ".join(str(v) for v in valeur if v not in (None, ""))
+    return str(valeur)
 
 
-def _url(valeur):
+def _est_http(texte):
+    """Vrai si le texte est une URL http(s) — les seules rendues en lien."""
+    return str(texte or "").strip().lower().startswith(("http://", "https://"))
+
+
+def blocs_de_fiche(project):
     """
-    URL d'attribut href, restreinte à http(s).
+    Structure d'affichage d'une fiche, PURE et testable.
 
-    Bloque les schémas exécutables (javascript:, data:) que le schéma autorise
-    déjà à ne pas produire, mais qu'une archive réimportée pourrait contenir.
+    Renvoie une liste de blocs (un par section non vide), chacun sous la forme
+    (emoji, titre, [(libellé, texte, est_lien), …]). La structure et l'ordre
+    viennent du schéma (SECTIONS) ; les libellés de LIBELLES avec repli sur la
+    clé. Aucun st.* ici — `rendre_fiche` ne fait qu'émettre ce que renvoie cette
+    fonction, ce qui la rend vérifiable sans Streamlit.
     """
-    texte = str(valeur or "").strip()
-    if texte.lower().startswith(("http://", "https://")):
-        return html.escape(texte, quote=True)
-    return ""
+    blocs = []
+    for section in SECTIONS:
+        donnees = project.get(section) if project else None
+        if not isinstance(donnees, dict) or not any(donnees.values()):
+            continue
+        emoji, titre = SECTION_META.get(section, ("", section))
+        champs = []
+        for champ, valeur in donnees.items():
+            texte = _valeur_affichable(valeur)
+            if not texte:
+                continue
+            if section == "Description" and champ == "resume" and len(texte) > 500:
+                texte = texte[:500] + "…"
+            chemin = f"{section}/{champ}"
+            est_lien = chemin in CHAMPS_URL and _est_http(texte)
+            champs.append((_libelle_champ(section, champ), texte, est_lien))
+        if champs:
+            blocs.append((emoji, titre, champs))
+    return blocs
 
 
-def format_expanded_data(doc_data):
-    """Format document data for expanded view based on new schema structure"""
-    if not doc_data:
-        return "Aucune donnée disponible"
-
-    html_content = '<div class="expanded-content">'
-
-    # Presentation info (capitalized key)
-    if 'Presentation' in doc_data:
-        pres_data = doc_data['Presentation']
-        if isinstance(pres_data, dict) and any(pres_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>📋 Informations du projet</h4>'
-            field_labels = {
-                'Titre': 'Titre',
-                'Bassin': 'Bassin',
-                "Nom de l'organisme": 'Nom de l\'organisme',
-                'Localisation': 'Localisation',
-                'Adresse précise': 'Adresse précise',
-                'Région': 'Région'
-            }
-            for key, label in field_labels.items():
-                value = pres_data.get(key, '')
-                if value:
-                    html_content += f'<div class="field-item"><span class="field-label">{_e(label)}:</span><span class="field-value">{_e(value)}</span></div>'
-            html_content += '</div>'
-
-    # Objectif (capitalized key)
-    if 'Objectif' in doc_data:
-        obj_data = doc_data['Objectif']
-        if isinstance(obj_data, dict) and obj_data.get('objectifs'):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>🎯 Objectif du maître d\'ouvrage</h4>'
-            html_content += f'<div class="field-item"><span class="field-value">{_e(obj_data["objectifs"])}</span></div>'
-            html_content += '</div>'
-
-    # Description (capitalized key)
-    if 'Description' in doc_data:
-        desc_data = doc_data['Description']
-        if isinstance(desc_data, dict) and any(desc_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>📝 Description</h4>'
-            if desc_data.get('resume'):
-                html_content += f'<div class="field-item"><span class="field-label">Résumé:</span><span class="field-value">{_e(desc_data["resume"][:500])}{"..." if len(desc_data["resume"]) > 500 else ""}</span></div>'
-            if desc_data.get('publication_recueil'):
-                html_content += f'<div class="field-item"><span class="field-label">Publication:</span><span class="field-value">{_e(desc_data["publication_recueil"])}</span></div>'
-            html_content += '</div>'
-
-    # Enjeux (capitalized key)
-    if 'Enjeux' in doc_data:
-        enjeux_data = doc_data['Enjeux']
-        if isinstance(enjeux_data, dict) and any(enjeux_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>🌱 Enjeux eau, biodiversité et climat</h4>'
-            if enjeux_data.get('date_debut'):
-                html_content += f'<div class="field-item"><span class="field-label">Date début:</span><span class="field-value">{_e(enjeux_data["date_debut"])}</span></div>'
-            if enjeux_data.get('date_fin'):
-                html_content += f'<div class="field-item"><span class="field-label">Date fin:</span><span class="field-value">{_e(enjeux_data["date_fin"])}</span></div>'
-            # `_e` joint déjà les listes : la pré-jointure d'avant faisait le
-            # travail deux fois et donnait à cette branche un chemin de jointure
-            # différent des trois branches génériques.
-            if enjeux_data.get('enjeux'):
-                html_content += f'<div class="field-item"><span class="field-label">Enjeux:</span><span class="field-value">{_e(enjeux_data["enjeux"])}</span></div>'
-            html_content += '</div>'
-
-    # Typologie (capitalized key)
-    if 'Typologie' in doc_data:
-        typo_data = doc_data['Typologie']
-        if isinstance(typo_data, dict) and any(typo_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>🔧 Typologie - Ingénierie écologique</h4>'
-            # Changed to handle flat dict structure
-            for key, value in typo_data.items():
-                if value and value != "":
-                    formatted_key = key.replace('_', ' ').title()
-                    html_content += f'<div class="field-item"><span class="field-label">{_e(formatted_key)}:</span><span class="field-value">{_e(value)}</span></div>'
-            html_content += '</div>'
-
-    # Directives européennes (capitalized key)
-    if 'Directives' in doc_data:
-        dir_data = doc_data['Directives']
-        if isinstance(dir_data, dict) and any(dir_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>🇪🇺 Référence directives européennes</h4>'
-            for key, value in dir_data.items():
-                if value and value != "":
-                    formatted_key = key.replace('_', ' ').title()
-                    html_content += f'<div class="field-item"><span class="field-label">{_e(formatted_key)}:</span><span class="field-value">{_e(value)}</span></div>'
-            html_content += '</div>'
-
-    # Contexte réglementaire (capitalized key)
-    if 'Contexte' in doc_data:
-        ctx_data = doc_data['Contexte']
-        if isinstance(ctx_data, dict) and any(ctx_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>⚖️ Contexte réglementaire</h4>'
-            if ctx_data.get('contexte'):
-                html_content += f'<div class="field-item"><span class="field-label">Contexte:</span><span class="field-value">{_e(ctx_data["contexte"])}</span></div>'
-            if ctx_data.get('autres'):
-                html_content += f'<div class="field-item"><span class="field-label">Autres:</span><span class="field-value">{_e(ctx_data["autres"])}</span></div>'
-            html_content += '</div>'
-
-    # Valorisation (capitalized key)
-    if 'Valorisation' in doc_data:
-        val_data = doc_data['Valorisation']
-        if isinstance(val_data, dict) and any(val_data.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>🏆 Valorisation de l\'opération</h4>'
-            for key, value in val_data.items():
-                if value and value != "":
-                    formatted_key = key.replace('_', ' ').title()
-                    if key == 'url':
-                        html_content += f'<div class="field-item"><span class="field-label">{_e(formatted_key)}:</span><span class="field-value"><a href="{_url(value)}" target="_blank">{_e(value)}</a></span></div>'
-                    else:
-                        html_content += f'<div class="field-item"><span class="field-label">{_e(formatted_key)}:</span><span class="field-value">{_e(value)}</span></div>'
-            html_content += '</div>'
-
-    # Travaux (capitalized key)
-    if 'Travaux' in doc_data:
-        travaux_data = doc_data['Travaux']
-        if isinstance(travaux_data, dict) and travaux_data.get('surface_travaux'):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>🗺️ Période et envergure des travaux</h4>'
-            html_content += f'<div class="field-item"><span class="field-label">Surface des travaux:</span><span class="field-value">{_e(travaux_data["surface_travaux"])}</span></div>'
-            html_content += '</div>'
-
-    # Documents (capitalized key)
-    if 'Documents' in doc_data:
-        doc_info = doc_data['Documents']
-        if isinstance(doc_info, dict) and any(doc_info.values()):
-            html_content += '<div class="field-group">'
-            html_content += '<h4>📚 Documents</h4>'
-            if doc_info.get('pages_extraire'):
-                html_content += f'<div class="field-item"><span class="field-label">Pages à extraire:</span><span class="field-value">{_e(doc_info["pages_extraire"])}</span></div>'
-            if doc_info.get('recueil_complet'):
-                html_content += f'<div class="field-item"><span class="field-label">Recueil complet:</span><span class="field-value"><a href="{_url(doc_info["recueil_complet"])}" target="_blank">{_e(doc_info["recueil_complet"])}</a></span></div>'
-            html_content += '</div>'
-
-    html_content += '</div>'
-    return html_content
-
+def rendre_fiche(project):
+    """
+    Rend le détail d'une fiche en éléments natifs Streamlit (une carte par
+    section). Remplace l'ancien format_expanded_data et son HTML brut : plus de
+    _e()/_url() ni de unsafe_allow_html, l'échappement est celui, natif, de
+    st.markdown.
+    """
+    blocs = blocs_de_fiche(project)
+    if not blocs:
+        st.info("Aucune donnée disponible pour cette fiche.")
+        return
+    for emoji, titre, champs in blocs:
+        with st.container(border=True):
+            st.markdown(f"##### {emoji} {titre}".strip())
+            for libelle, texte, est_lien in champs:
+                if est_lien:
+                    st.markdown(f"**{libelle} :** [{texte}]({texte})")
+                else:
+                    st.markdown(f"**{libelle} :** {texte}")
 
 
 MODES = {
@@ -798,20 +747,25 @@ def _nom_export(filename):
     return f"{base}_REX_export.xlsx"
 
 
+@st.fragment
 def display_results_table():
-    """Display table with parsed results from last upload"""
+    """
+    Tableau natif des fiches extraites ; sélectionner une ligne affiche son
+    détail dessous (rendu natif, schéma → LIBELLES). Fragment : la sélection
+    ne rejoue que ce bloc, pas toute la page. Remplace st_mui_table (iframe,
+    non maintenu) et sa CSS dupliquée.
+    """
     if 'last_parsed_data' not in st.session_state:
         return
 
     data = st.session_state.last_parsed_data
     projects = data.get('projects', [])
-
     if not projects:
         return
 
-    st.markdown("---")
-    st.markdown(f"### 📊 Résultats de l'analyse - {data['filename']}")
-    st.markdown(f"**{len(projects)} projet(s) extrait(s)** - {data['date']}")
+    st.divider()
+    st.subheader(f"📊 Résultats — {data['filename']}")
+    st.caption(f"{len(projects)} projet(s) extrait(s) · {data['date']}")
 
     # Génération différée : le classeur n'est construit qu'au clic. Il l'était
     # jusqu'ici à chaque rerun, que l'utilisateur télécharge ou non.
@@ -824,170 +778,27 @@ def display_results_table():
         key="dl_excel_resultats",
     )
 
-    # Prepare DataFrame for st_mui_table
-    df_data = []
-    for idx, project in enumerate(projects):
-        titre = _titre_de_fiche(project, idx)
-        page_debut = project.get("_page_debut", "N/A")
-        page_fin = project.get("_page_fin", "N/A")
+    lignes = [{
+        "Titre du projet": _titre_de_fiche(project, idx),
+        "Page début": project.get("_page_debut"),
+        "Page fin": project.get("_page_fin"),
+        "Conformité": _libelle_verdict(project.get("_validation_status")),
+    } for idx, project in enumerate(projects)]
 
-        df_data.append({
-            "Titre du projet": titre,
-            "Page début": page_debut,
-            "Page fin": page_fin,
-            "Détails": format_expanded_data(project)
-        })
-    
-    df = pd.DataFrame(df_data)
-    
-    # Display table with expandable details
-    try:
-        st_mui_table(
-            df,
-            customCss="""
-/* Material 3 Expressive - Water & Biodiversity Theme */
-:root {
-    /* Primary - Deep Ocean */
-    --md-sys-color-primary: #006A6B;
-    --md-sys-color-on-primary: #FFFFFF;
-    --md-sys-color-primary-container: #9CF0F2;
-    --md-sys-color-on-primary-container: #002020;
-    
-    /* Secondary - Wetland Green */
-    --md-sys-color-secondary: #4A6363;
-    --md-sys-color-on-secondary: #FFFFFF;
-    --md-sys-color-secondary-container: #CCE8E8;
-    --md-sys-color-on-secondary-container: #051F1F;
-    
-    /* Tertiary - Fresh Water */
-    --md-sys-color-tertiary: #00838F;
-    --md-sys-color-on-tertiary: #FFFFFF;
-    
-    /* Surface & Background */
-    --md-sys-color-surface: #FAFDFC;
-    --md-sys-color-on-surface: #191C1C;
-    --md-sys-color-surface-variant: #DAE5E4;
-    --md-sys-color-surface-container-low: #F0F4F4;
-    --md-sys-color-surface-container: #E6EBEB;
-    --md-sys-color-surface-container-high: #DFE4E4;
-    
-    /* Outline & Borders */
-    --md-sys-color-outline: #6F7979;
-    --md-sys-color-outline-variant: #BEC8C8;
-    
-    /* Biodiversity Accent Colors */
-    --bio-green: #2E7D32;
-    --bio-blue: #0277BD;
-    --bio-teal: #00695C;
-    
-    /* Elevation & Shadow */
-    --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 106, 107, 0.06);
-    --elevation-2: 0 3px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 106, 107, 0.08);
-    --elevation-3: 0 6px 12px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 106, 107, 0.1);
-    --elevation-4: 0 12px 24px rgba(0, 0, 0, 0.14), 0 8px 16px rgba(0, 106, 107, 0.12);
-    
-    /* Expressive Radii */
-    --radius-small: 12px;
-    --radius-medium: 20px;
-    --radius-large: 28px;
-    --radius-extra-large: 36px;
-    
-    /* Transitions */
-    --transition-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
-    --transition-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1);
-    --transition-accelerate: cubic-bezier(0.4, 0.0, 1, 1);
-}
+    etat = st.dataframe(
+        pd.DataFrame(lignes),
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        # Sans key stable, la sélection serait perdue à chaque rerun.
+        key="tableau_resultats",
+    )
 
-/* Table styling - M3 Expressive */
-.MuiTableContainer-root {
-    border-radius: var(--radius-large) !important;
-    box-shadow: var(--elevation-2) !important;
-    background: var(--md-sys-color-surface) !important;
-    overflow: hidden !important;
-}
-
-.MuiTableHead-root {
-    background: linear-gradient(135deg, var(--md-sys-color-primary-container) 0%, var(--md-sys-color-secondary-container) 100%) !important;
-}
-
-.MuiTableHead-root th {
-    color: var(--md-sys-color-on-primary-container) !important;
-    font-weight: 600 !important;
-    font-size: 0.9375rem !important;
-    letter-spacing: 0.5px !important;
-    padding: 1.25rem 1rem !important;
-}
-
-.MuiTableBody-root tr {
-    transition: all 0.2s var(--transition-standard) !important;
-}
-
-.MuiTableBody-root tr:hover {
-    background: var(--md-sys-color-surface-container-low) !important;
-    transform: translateX(2px) !important;
-}
-
-.MuiTableCell-root {
-    border-bottom: 1px solid var(--md-sys-color-outline-variant) !important;
-    padding: 1rem !important;
-}
-
-.MuiTablePagination-root {
-    border-top: 2px solid var(--md-sys-color-primary-container) !important;
-}
-
-.MuiTablePagination-toolbar > p {
-    margin: 0 !important;
-    font-weight: 500 !important;
-    color: var(--md-sys-color-on-surface) !important;
-}
-
-.MuiIconButton-root {
-    color: var(--md-sys-color-primary) !important;
-    transition: all 0.2s var(--transition-standard) !important;
-}
-
-.MuiIconButton-root:hover {
-    background: var(--md-sys-color-primary-container) !important;
-    transform: scale(1.1) !important;
-}
-
-
-                td.MuiTableCell-sizeSmall:first-child {
-                    display: none;
-                }
-
-                .expanded-content .field-group {
-                    padding: 1rem 0;
-                }
-
-
-            """,
-            detailColumns=["Détails"],
-            detailColNum=1,
-            detailsHeader="",
-            paginationSizes=[10, 25, 50],
-            paginationLabel="Projets par page",
-            enablePagination=True,
-            showIndex=False,
-            size="medium",
-            stickyHeader=True,
-            enable_sorting=False,
-            # Sans key=, le composant se remonte à chaque rerun et perd les
-            # lignes dépliées.
-            key="tableau_resultats",
-        )
-    except Exception as e:
-        st.error(f"Erreur d'affichage du tableau : {e}")
-        # Repli sur des composants Streamlit natifs, avec la même résolution de
-        # titre que le tableau — voir `_titre_de_fiche`.
-        for idx, project in enumerate(projects):
-            titre = _titre_de_fiche(project, idx)
-            page_debut = project.get("_page_debut", "N/A")
-            page_fin = project.get("_page_fin", "N/A")
-
-            with st.expander(f"📄 {titre} (Pages {page_debut}-{page_fin})"):
-                st.markdown(format_expanded_data(project), unsafe_allow_html=True)
+    # Accès par item (dict) : la valeur de retour de st.dataframe est un dict.
+    rows = etat["selection"]["rows"] if etat and "selection" in etat else []
+    idx = rows[0] if rows else 0
+    st.markdown(f"#### 📄 {_titre_de_fiche(projects[idx], idx)}")
+    rendre_fiche(projects[idx])
 
 
 def display_failures_panel():

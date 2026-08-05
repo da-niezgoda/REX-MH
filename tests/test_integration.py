@@ -296,24 +296,34 @@ def test_nom_export_insensible_a_la_casse():
     assert app._nom_export("recueil.pdf") == "recueil_REX_export.xlsx"
 
 
-# === 5. Échappement HTML ====================================================
+# === 5. Rendu natif : le texte reste inerte ================================
+# `rendre_fiche` s'appuie sur l'échappement natif de st.markdown : la DONNÉE
+# garde le texte verbatim, et c'est le rendu qui neutralise le HTML — plus de
+# _e()/_url(). On vérifie donc la donnée, pas une chaîne HTML.
 
 
-def test_echappement_html(parcours):
+def test_le_texte_reste_verbatim(parcours):
     data = store.load_run_as_parsed_data(parcours.res["run_id"])
-    rendu = app.format_expanded_data(data["projects"][0])
-    assert "<tourbière>" not in rendu and "&lt;tourbière&gt;" in rendu
-    assert "&amp; marais" in rendu
+    textes = {txt for _, _, champs in app.blocs_de_fiche(data["projects"][0])
+              for _, txt, _ in champs}
+    assert "Restauration <tourbière> & marais" in textes
 
 
-def test_html_malveillant_neutralise():
+def test_url_non_http_jamais_rendue_en_lien():
+    """Un « javascript: » n'est jamais marqué comme lien ; seul http(s) l'est."""
     malveillant = {"Presentation": {"Titre": "<script>alert(1)</script>"},
                    "Valorisation": {"url": "javascript:alert(1)",
                                     "type_valorisation": ["a", "b"]}}
-    rendu = app.format_expanded_data(malveillant)
-    assert "<script>" not in rendu and "&lt;script&gt;" in rendu
-    assert 'href="javascript:' not in rendu, "schéma d'URL exécutable non filtré"
-    assert "a, b" in rendu, "une liste hors Enjeux doit être jointe"
+    champs = {lib: (txt, est_lien)
+              for _, _, cs in app.blocs_de_fiche(malveillant)
+              for lib, txt, est_lien in cs}
+    # <script> conservé tel quel (neutralisé au rendu, pas ici)
+    assert champs["Titre"] == ("<script>alert(1)</script>", False)
+    # javascript: présent en texte, mais PAS marqué comme lien
+    assert champs[app._libelle_champ("Valorisation", "url")] == \
+        ("javascript:alert(1)", False)
+    # liste jointe, hors Enjeux
+    assert champs[app._libelle_champ("Valorisation", "type_valorisation")][0] == "a, b"
 
 
 # === 6. Relance des fiches en échec =========================================
