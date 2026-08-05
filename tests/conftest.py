@@ -4,9 +4,9 @@ Aiguillages communs à la suite. Aucun appel API, aucune clé nécessaire.
 Trois pièges du dépôt sont neutralisés ici une fois pour toutes, là où les trois
 anciens scripts les traitaient chacun à sa façon :
 
-1. **Chemins relatifs.** `app.load_schema("REX.schema.json")`, `styles.css` et les
-   prompts sont lus relativement au répertoire courant, ce qui obligeait à lancer
-   les scripts depuis la racine du dépôt. On y va une fois pour toutes.
+1. **Chemins relatifs.** `app.load_schema("REX.schema.json")` et les prompts sont
+   lus relativement au répertoire courant, ce qui obligeait à lancer les scripts
+   depuis la racine du dépôt. On y va une fois pour toutes.
 
 2. **`load_dotenv()` (app.py) n'écrase PAS une variable déjà posée.** La clé
    factice doit donc être en place AVANT tout `import app`, sinon la vraie clé du

@@ -44,8 +44,9 @@ PDF déposé
    ├─▶ 6. Persistance SQLite : document, traitement, une ligne par fiche
    │        (y compris les fiches en échec, pour pouvoir les relancer)
    │
-   ├─▶ 7. Affichage : tableau Material UI (st_mui_table) avec ligne dépliable,
-   │        panneau des fiches en échec, onglet Historique
+   ├─▶ 7. Affichage : écrans natifs (st.navigation) — tableau st.dataframe,
+   │        détail rendu par section (schéma → LIBELLES), panneau des fiches
+   │        en échec, écran Historique
    │
    └─▶ 8. Export : aplatissement des sections en colonnes → Excel (xlsxwriter)
 ```
@@ -99,15 +100,15 @@ Points de conception notables :
 
 | Fichier | Rôle |
 | --- | --- |
-| `app.py` | Interface Streamlit et orchestration : chargement des schémas/prompts, enchaînement OCR → découpage → extraction, onglets Traitement / Historique, rendu du tableau, export Excel. |
+| `app.py` | Couche Streamlit : chargement des schémas/prompts, écrans (`st.navigation` : Traitement / Historique / Maintenance), rendu du tableau et du détail, export Excel. L'orchestration OCR → découpage → extraction vit dans `pipeline.py` ; `app.py` n'en garde que de fines enveloppes qui fabriquent le client et le contexte de session. |
 | `REXPrompt.md` | Prompt système d'**extraction** d'une fiche projet (rôle, format d'entrée page par page, gestion des champs absents → `""`). |
 | `listPrompt.md` | Prompt système de **segmentation** du recueil (identifier l'introduction/annexes, détecter les ruptures, définir `PageDebut`/`PageFin`). |
 | `REX.schema.json` | Modèle de données d'une fiche projet : 10 sections (`Presentation`, `Typologie`, `Enjeux`, `Directives`, `Travaux`, `Contexte`, `Objectif`, `Description`, `Valorisation`, `Documents`) avec descriptions détaillées et **énumérations métier** (23 régions, 11 types d'ingénierie écologique, 43 types de milieux Ramsar, 13 typologies SDAGE, 11 typologies hydrogéomorphologiques Sandre, 53 techniques de génie écologique, 15 enjeux, 17 statuts de protection…). |
 | `REXlist.schema.json` | Modèle de la liste de segments (`PagesHorsProjet[]`, puis `Liste[] : PageDebut, PageFin, Titre, Motif`). L'ordre des propriétés est **l'ordre de génération** en mode strict : les pages hors projet d'abord, et la justification après les bornes de pages — voir *Limites connues*. |
 | `conformite.py` | Normalisation et validation d'une fiche après génération : recalage des valeurs d'énumération approchantes, dédoublonnage des listes, verdict `conforme` / `corrigé` / `non conforme`. N'importe pas `streamlit`. |
 | `vocabulary.json` | Vocabulaire contrôlé hors du code : alias de synonymes, réglages de normalisation. Étendu par la tâche 5 (clés d'export, formats, routage). |
-| `styles.css` | Thème « Material 3 Expressive » eau & biodiversité (variables CSS, en-tête, cartes, uploader, boutons, messages). |
-| `pipeline.py` | Cœur du traitement : client Mistral, construction des requêtes, concurrence, mode par lot, classification des erreurs, comptabilité des jetons. **N'importe pas `streamlit`** (voir *Limites connues*). |
+| `.streamlit/config.toml` | Thème natif « Material 3 » eau & biodiversité (palette, rayons, couleurs de tableau, clair + sombre). Remplace l'ancien `styles.css` injecté : atteint tous les widgets natifs sans iframe, une seule source de vérité pour l'apparence. |
+| `pipeline.py` | Cœur du traitement : client Mistral, construction des requêtes, concurrence, mode par lot, classification des erreurs, comptabilité des jetons, **et l'orchestration** (OCR → découpage → extraction → conformité → persistance, `ctx` passé en argument). **N'importe pas `streamlit`** (voir *Limites connues*). |
 | `store.py` | Persistance SQLite : cache OCR, historique des traitements, fiches, travaux par lot, export/import d'archive. N'importe pas `streamlit` non plus. |
 | `smoke_test.py` | Vérification en direct de la chaîne Mistral sur l'extrait 18 pages : blocs structurels, conformité au schéma, champs signalés par le client, et **mesure du cache de prompt** (deux fiches consécutives). Options `--fixture` (hors ligne, sans clé) et `--batch` (répétition du mode par lot). |
 | `tests/` | Suite `pytest` hors ligne, sans clé API, plus `eval_rex.py` qui note la qualité du découpage — voir `tests/README.md`. |
@@ -123,8 +124,8 @@ Points de conception notables :
 | Domaine | Choix |
 | --- | --- |
 | Langage | Python 3.10+ (3.11 en dev container) |
-| Interface | [Streamlit](https://streamlit.io) 1.60 |
-| Tableau | `st-mui-table` (composant Material UI, lignes dépliables via `detailColumns`) |
+| Interface | [Streamlit](https://streamlit.io) 1.60 — écrans natifs (`st.navigation`), thème `.streamlit/config.toml` |
+| Tableau | `st.dataframe` natif, sélection d'une ligne → détail rendu par section |
 | SDK | `mistralai` 2.x — attention, l'import est `from mistralai.client import Mistral` |
 | OCR | API Mistral — `mistral-ocr-4-0` (Markdown page par page, blocs structurels, en-têtes/pieds, confiance) |
 | Segmentation | API Mistral — `mistral-small-latest` (Small 4) |
@@ -292,11 +293,12 @@ Développement mené par une seule personne (`da-niezgoda` / `d.niezgoda`), 24 c
   sections partageant un nom de champ s'écraseraient dans l'export Excel. Les noms nus étant le
   contrat de colonnes du client, le schéma d'aplatissement est conservé et l'invariant est **verrouillé
   par un test** — ajouter un doublon fait échouer la suite au lieu de faire disparaître une colonne.
-- `st-mui-table` n'a plus de version depuis janvier 2024, et rend dans son propre iframe — d'où le
-  jeu de jetons Material 3 dupliqué en `customCss` dans `app.py`. La refonte d'interface le remplacera
-  par des composants Streamlit natifs.
-- `format_expanded_data()` construit du HTML à la main (échappé, mais à la main) : une refonte
-  pilotée par le schéma éviterait d'avoir à toucher au rendu pour chaque nouveau champ.
+- L'affichage du détail d'une fiche est piloté par le schéma : `blocs_de_fiche()` parcourt les
+  sections et rend chaque champ nativement (les libellés viennent de `LIBELLES`, avec repli sur la
+  clé). Un nouveau champ du schéma apparaît donc sans toucher au moteur de rendu. Le rendu natif
+  échappe par défaut : plus de HTML construit à la main. *Police :* le thème utilise `sans-serif`
+  (pile système) et non Roboto — charger Roboto demanderait un `[[theme.fontFaces]]` externe, fragile
+  pour une application cliente ; ajout possible en quelques lignes.
 - La note `score_rex_v1` combine **trois** composantes seulement — découpage, conformité, remplissage.
   La correspondance champ par champ demande une vérité terrain que seuls les experts du client peuvent
   fournir : `tests/fixtures/verite-18p.json` porte donc `champs: {}`, et le scoreur annonce ce qu'il
