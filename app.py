@@ -41,7 +41,7 @@ st.set_page_config(
     page_title="REX Zones Humides",
     page_icon="🌿",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded",  # la navigation (st.navigation) vit ici
 )
 
 
@@ -315,39 +315,36 @@ def actualiser_travail_par_lot(job_id):
 
 
 def process_uploaded_file(file, filename, mode="rapide"):
-    """Traite un PDF déposé, avec barre de progression."""
-    with st.container():
+    """Traite un PDF déposé, avec progression par étapes (st.status)."""
+    with st.status("Traitement en cours…", expanded=True) as statut:
         barre = st.progress(0)
-        texte = st.empty()
 
-        def update_progress(progress, status, **_):
-            # **_ absorbe les détails (phase, faits, total, echecs) que la
-            # tâche 4 pourra exploiter sans retoucher au pipeline.
+        def update_progress(progress, message, **_):
+            # **_ absorbe les détails (phase, faits, total, echecs) du pipeline.
             barre.progress(max(0.0, min(1.0, progress)))
-            texte.text(status)
+            statut.update(label=message)
 
         try:
             resultat = parse_pdf_document(file, filename,
                                          progress_callback=update_progress, mode=mode)
         except Exception as e:
-            barre.empty()
-            texte.empty()
+            statut.update(label=f"Erreur : {e}", state="error")
             st.error(f"Erreur lors du traitement : {e}")
             return
 
-        barre.empty()
-        texte.empty()
+        etat = "error" if resultat.get("statut") == "echec" else "complete"
+        statut.update(label="Traitement terminé", state=etat, expanded=False)
 
-        if resultat["run_id"]:
-            st.session_state.last_parsed_data = {
-                'filename': filename,
-                'date': datetime.now().strftime("%d/%m/%Y %H:%M"),
-                'projects': resultat["projects"],
-                'run_id': resultat["run_id"],
-                'document_id': resultat["document_id"],
-                'resultat': resultat,
-            }
-        _afficher_bilan(resultat)
+    if resultat["run_id"]:
+        st.session_state.last_parsed_data = {
+            'filename': filename,
+            'date': datetime.now().strftime("%d/%m/%Y %H:%M"),
+            'projects': resultat["projects"],
+            'run_id': resultat["run_id"],
+            'document_id': resultat["document_id"],
+            'resultat': resultat,
+        }
+    _afficher_bilan(resultat)
 
 
 def _afficher_bilan(resultat):
@@ -1043,36 +1040,36 @@ def _construire_archive(inclure_ocr):
                                mistralai_version=pipeline.version_mistralai())
 
 
-def _display_maintenance():
-    """Rechargement des prompts et des schémas depuis le disque."""
-    with st.popover("⚙️ Maintenance"):
-        st.caption(
-            "Recharge les prompts Markdown, les schémas JSON et le vocabulaire "
-            "depuis le disque. Nécessaire après avoir édité REXPrompt.md, "
-            "listPrompt.md, REX.schema.json, REXlist.schema.json ou "
-            "vocabulary.json : ils sont chargés une fois par session, donc un "
-            "simple rerun ne suffit pas."
-        )
-        if st.button("♻️ Recharger prompts et schémas", key="recharger_prompts"):
-            for cle in CLES_PROMPTS:
-                st.session_state.pop(cle, None)
-            load_text_file.clear()
-            st.toast("Prompts, schémas et vocabulaire rechargés")
-            st.rerun()
+def page_maintenance():
+    """Écran de maintenance : rechargement des prompts/schémas, état de l'app."""
+    st.subheader("⚙️ Maintenance")
+    st.caption(
+        "Recharge les prompts Markdown, les schémas JSON et le vocabulaire "
+        "depuis le disque. Nécessaire après avoir édité REXPrompt.md, "
+        "listPrompt.md, REX.schema.json, REXlist.schema.json ou "
+        "vocabulary.json : ils sont chargés une fois par session, donc un "
+        "simple rerun ne suffit pas."
+    )
+    if st.button("♻️ Recharger prompts et schémas", key="recharger_prompts"):
+        for cle in CLES_PROMPTS:
+            st.session_state.pop(cle, None)
+        load_text_file.clear()
+        st.toast("Prompts, schémas et vocabulaire rechargés")
+        st.rerun()
 
-        # Un alias qui vise une valeur absente de l'énumération n'est pas une
-        # erreur fatale — « Site Natura 2000 » n'existe pas encore dans
-        # Contexte.contexte, et c'est la tâche 5 qui l'ajoutera. Mais il ne doit
-        # pas rester invisible, sinon un alias mal orthographié ne se recale
-        # jamais sans que personne ne le sache.
-        problemes = conformite.construire_index(
-            st.session_state.REXSchema, st.session_state.get("vocabulaire") or {})[1]
-        if problemes:
-            st.warning("Vocabulaire — " + str(len(problemes)) + " point(s) à revoir :")
-            for probleme in problemes:
-                st.caption(f"• {probleme}")
+    # Un alias qui vise une valeur absente de l'énumération n'est pas une
+    # erreur fatale — « Site Natura 2000 » n'existe pas encore dans
+    # Contexte.contexte, et c'est la tâche 5 qui l'ajoutera. Mais il ne doit
+    # pas rester invisible, sinon un alias mal orthographié ne se recale
+    # jamais sans que personne ne le sache.
+    problemes = conformite.construire_index(
+        st.session_state.REXSchema, st.session_state.get("vocabulaire") or {})[1]
+    if problemes:
+        st.warning("Vocabulaire — " + str(len(problemes)) + " point(s) à revoir :")
+        for probleme in problemes:
+            st.caption(f"• {probleme}")
 
-        st.caption(f"Base d'historique : `{store.db_path() or get_db_path()}`")
+    st.caption(f"Base d'historique : `{store.db_path() or get_db_path()}`")
 
 
 def _charger_prompts_et_schemas():
@@ -1116,26 +1113,33 @@ def _charger_prompts_et_schemas():
         st.session_state.vocabulaire = load_vocabulaire()
 
 
+def page_traitement():
+    """Écran principal : import du PDF, échecs éventuels, résultats."""
+    display_file_upload()
+    display_failures_panel()
+    display_results_table()
+
+
+def page_historique():
+    """Écran d'historique : documents traités, lots en attente, sauvegarde."""
+    display_history()
+
+
 def main():
-    """Point d'entrée de l'application."""
+    """Point d'entrée : écrans réels via st.navigation (rail latéral)."""
     _charger_prompts_et_schemas()
     store.init_db(get_db_path())
 
+    # En-tête global, affiché au-dessus de chaque écran.
     display_dashboard()
 
-    # Deux onglets seulement : « Traitement » est l'écran existant, inchangé
-    # dans son enchaînement. La refonte d'interface (tâche 4) transposera ces
-    # corps d'onglet en écrans sans les réécrire.
-    onglet_traitement, onglet_historique = st.tabs(["Traitement", "Historique"])
-
-    with onglet_traitement:
-        _display_maintenance()
-        display_file_upload()
-        display_failures_panel()
-        display_results_table()
-
-    with onglet_historique:
-        display_history()
+    pages = [
+        st.Page(page_traitement, title="Traitement",
+                icon=":material/upload_file:", default=True),
+        st.Page(page_historique, title="Historique", icon=":material/history:"),
+        st.Page(page_maintenance, title="Maintenance", icon=":material/settings:"),
+    ]
+    st.navigation(pages).run()
 
 
 if __name__ == "__main__":
