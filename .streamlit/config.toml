@@ -1,39 +1,36 @@
 # Thème natif M3 « Eau & Biodiversité » (tâche 4).
 #
-# Remplace la feuille de style injectée : le thème natif atteint TOUS les widgets
-# Streamlit — boutons, champs, expanders, st.dataframe — sans iframe ni CSS
-# dupliquée. Les valeurs viennent des jetons M3 de styles.css (bloc :root).
-# secrets.toml reste le seul fichier .streamlit ignoré par git.
+# Base du look ; le polissage Material 3 Expressive (dégradés, cartes, badges de
+# section) vit dans styles.css, injecté par app.load_css. secrets.toml reste le
+# seul fichier .streamlit ignoré par git.
 #
-# Police : « sans-serif » (pile système) et non Roboto. Charger Roboto
-# demanderait un [[theme.fontFaces]] pointant un woff2 externe — dépendance
-# réseau fragile pour une application cliente, qui retomberait en dev hors ligne.
-# L'écart visuel avec une sans-serif propre est mineur ; Roboto reste ajoutable
-# en quelques lignes si besoin.
+# Police : « sans-serif » (pile système) et non Roboto — charger Roboto
+# demanderait un [[theme.fontFaces]] externe, fragile pour une application
+# cliente. Ajout possible en quelques lignes si besoin.
 
 [theme]
 base = "light"
-primaryColor = "#006A6B"            # Primary — Deep Ocean
-backgroundColor = "#FAFDFC"         # surface
-secondaryBackgroundColor = "#E6EBEB"  # surface-container (widgets, sidebar)
-textColor = "#191C1C"               # on-surface
-linkColor = "#00838F"               # tertiary — Fresh Water
-borderColor = "#BEC8C8"             # outline-variant
+primaryColor = "#009688"            # teal vif — accent principal
+backgroundColor = "#F4FBF9"         # surface, très légèrement teintée
+secondaryBackgroundColor = "#E2F1ED"  # cartes, widgets, sidebar : teinte, pas gris
+textColor = "#10302C"               # encre sombre, fort contraste
+linkColor = "#00796B"
+borderColor = "#A7D3CB"
 font = "sans-serif"
 headingFont = "sans-serif"
-baseRadius = "0.75rem"              # ≈ M3 --radius-small (12px) : cartes, champs
-buttonRadius = "full"               # boutons pilule (M3)
-showWidgetBorder = true             # rendu « outlined » M3
+baseRadius = "large"                # coins généreux (M3 Expressive)
+buttonRadius = "full"               # boutons pilule
+showWidgetBorder = true
 showSidebarBorder = true
-dataframeHeaderBackgroundColor = "#E6EBEB"
-dataframeBorderColor = "#BEC8C8"
+dataframeHeaderBackgroundColor = "#C5E7DF"
+dataframeBorderColor = "#A7D3CB"
 
 [theme.dark]
-primaryColor = "#5ED4D6"            # teinte claire pour fond sombre (M3 inverse)
-backgroundColor = "#0F1515"
-secondaryBackgroundColor = "#1A2323"
-textColor = "#E0E6E5"
-linkColor = "#5ED4D6"
-borderColor = "#3A4746"
-dataframeHeaderBackgroundColor = "#1A2323"
-dataframeBorderColor = "#3A4746"
+primaryColor = "#4DB6AC"
+backgroundColor = "#0E1918"
+secondaryBackgroundColor = "#172622"
+textColor = "#E4F3EF"
+linkColor = "#80CBC4"
+borderColor = "#2F4A44"
+dataframeHeaderBackgroundColor = "#1E2E2A"
+dataframeBorderColor = "#2F4A44"
