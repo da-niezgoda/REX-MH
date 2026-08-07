@@ -41,7 +41,11 @@ import store
 # _resolved_model) afin que deux extractions restent comparables.
 MODEL_OCR = "mistral-ocr-4-0"                # OCR 4 : blocs structurels + confiance
 MODEL_EXTRACTION = "mistral-medium-latest"   # Medium 3.5 : le plus précis
-MODEL_SEGMENTATION = "mistral-small-latest"  # Small 4 : rapide, suffisant pour découper
+# Segmentation ET vérification : Medium 3.5, version ÉPINGLÉE (pas l'alias -latest).
+# Le petit modèle est non déterministe sur un prompt de 90 k jetons (voir le bloc
+# MAX_ITER_SEGMENTATION) ; le moyen est stable. On épingle la version pour verrouiller
+# ce comportement mesuré (même esprit que temperature=0 + graine).
+MODEL_SEGMENTATION = "mistral-medium-3-5"
 
 # Graine fixe : deux exécutions sur le même document doivent donner le même
 # résultat. temperature=0.0 + graine + json_schema strict sont délibérés
@@ -82,21 +86,34 @@ MAX_CONCURRENCE_EXTRACTION = 4
 # d'1. À ce volume, c'est négligeable.
 SEUIL_ECHAUFFEMENT = 3
 
-# Segmentation par ÉNUMÉRATION + boucle vérifier→raffiner (voir `_segmenter`).
+# Segmentation par ÉNUMÉRATION (document entier) + boucle vérifier→raffiner
+# (voir `_segmenter`). Le modèle énumère les projets sur tout le document (90 k
+# jetons tiennent dans la fenêtre de Medium), puis une boucle d'auto-critique
+# (≤ MAX_ITER_SEGMENTATION) rattrape omissions et entrées superflues. Deux constats
+# mesurés EN DIRECT sur le recueil de 129 pages ont fixé ces choix :
 #
-# Le petit modèle segmente parfaitement 18 pages (2 fiches, score 1.0) mais se
-# « perd au milieu » d'un document long : sur le recueil de 129 pages, l'appel
-# unique rendait 10 fiches, propres jusqu'à la p.40 puis un saut direct à 128-129
-# (~17 fiches escamotées). Ce n'est PAS un manque de contexte (90 k jetons tiennent
-# dans la fenêtre) mais une paresse d'attention. Le fenêtrage glissant, essayé
-# avant, relevait le plancher mais plafonnait en rappel (corpus à 24 fiches : 1
-# projet perdu) — découper l'espace ne rattrape pas une fiche oubliée DANS une
-# fenêtre. On énumère donc sur le document entier, puis une boucle d'auto-critique
-# rattrape omissions (via les trous INTÉRIEURS de couverture) et entrées superflues.
+#  - Le PETIT modèle est NON DÉTERMINISTE sur ce prompt : sur une entrée IDENTIQUE
+#    il rendait tantôt 9, tantôt 26, tantôt 34 fiches (bornes incohérentes) — malgré
+#    temperature=0 + graine fixe. La « paresse d'attention » ne se corrige pas par
+#    les paramètres. Le fenêtrage glissant stabilisait (26-28) en bornant la région
+#    par appel, mais perdait ~1 fiche à une frontière de fenêtre.
+#  - Le modèle MOYEN est STABLE : énumération brute 29/29/29 sur la même entrée,
+#    couvrant 10-129. D'où MODEL_SEGMENTATION = medium (contrepartie assumée : plus
+#    cher que small, pour ces étapes critiques). La boucle devient un filet : elle
+#    ne travaille que s'il reste un vrai trou (voir MIN_PAGES_TROU_SIGNALE) et refuse
+#    d'ajouter une fiche AVANT la première page couverte (le spécimen « fiche-type »
+#    p.4, que le medium exclut à raison mais que le vérificateur re-proposait).
 #
 # Plafond de la boucle de correction ; au-delà, on force le dernier audit assaini
-# (filet no-loss). Mesuré : 6/6 corpus « propres », 27 fiches réelles sur le recueil.
+# (filet no-loss). Mesuré : énumération medium stable à 29 fiches sur le recueil.
 MAX_ITER_SEGMENTATION = 3
+
+# Un vrai projet omis occupe ≥ 2 pages. Un trou de couverture d'UNE seule page est
+# un séparateur hors-projet (page de section, carte, blanc), pas une fiche oubliée.
+# On ne SIGNALE au vérificateur que les trous d'au moins ce nombre de pages
+# consécutives : sans ce filtre, le medium recevait ~20 séparateurs comme trous et
+# rendait autant de faux « manquants », d'où un churn inutile de la boucle.
+MIN_PAGES_TROU_SIGNALE = 2
 
 # Au-delà de cette fraction d'entrées déclarées « superflues », l'audit a confondu
 # « à supprimer » avec « vérifié » (observé en direct : un audit rendant les 8
@@ -507,24 +524,8 @@ def _echec(index, titre, debut, fin, categorie, message, reessayable, code=None,
 # --- Segments ----------------------------------------------------------------
 
 
-def _trous_interieurs(liste, nb_pages):
-    """
-    Pages non couvertes SITUÉES ENTRE la première et la dernière page couverte —
-    les seuls vrais candidats à un projet omis, offerts en indice au vérificateur.
-
-    On écarte à dessein les pages non couvertes de TÊTE (avant la première fiche)
-    et de QUEUE (après la dernière) : ce sont l'introduction, le sommaire et la
-    carte en ouverture, les annexes en clôture — que l'énumération exclut à raison.
-    Les offrir en indice poussait le vérificateur à les promouvoir en fiches
-    fantômes (mesuré sur le recueil réel : intro + sommaire + carte rendus en
-    3 fiches). Un trou INTÉRIEUR, lui, est presque toujours une fiche sautée
-    (mesuré : les pages 54-75 récupérées sur le même recueil).
-
-    Indice au critique, JAMAIS une donnée assénée : ce n'est pas le cross-check
-    `set(1..N) − ∪segments == PagesHorsProjet` que CLAUDE.md interdit (il se
-    contredit à grande échelle) — on ne compare rien, on tend des pages à examiner
-    et on laisse le modèle trancher page par page.
-    """
+def _pages_couvertes(liste, nb_pages):
+    """Ensemble des pages (1-indexées) couvertes par au moins un segment valide."""
     couvertes = set()
     for seg in liste or []:
         debut, fin = seg.get("PageDebut"), seg.get("PageFin")
@@ -535,9 +536,49 @@ def _trous_interieurs(liste, nb_pages):
         if debut > fin:
             debut, fin = fin, debut
         couvertes.update(range(max(1, debut), min(nb_pages, fin) + 1))
+    return couvertes
+
+
+def _trous_de_couverture(liste, nb_pages):
+    """
+    Pages non couvertes à SIGNALER au vérificateur comme candidats à un projet omis :
+    tout ce qui n'est pas couvert À PARTIR de la première page couverte — donc les
+    trous INTÉRIEURS *et* la région de QUEUE — mais uniquement par blocs d'au moins
+    MIN_PAGES_TROU_SIGNALE pages consécutives. Trois réglages, chacun né d'un échec
+    mesuré sur le recueil réel :
+
+      - On écarte la TÊTE (pages avant la première fiche) : intro, sommaire, carte,
+        spécimen « fiche-type ». Les offrir poussait le vérificateur à les promouvoir
+        en fiches fantômes (mesuré : 3 fantômes de préambule).
+      - On GARDE la QUEUE. La version « intérieur seul » d'origine l'écartait aussi
+        (bornée à max(couvertes)) — or quand l'énumération s'arrête tôt (petit modèle :
+        p.40 sur 129), TOUTES les fiches manquantes sont EN QUEUE ; ne pas les
+        signaler perdait ~17 projets (le bug qui rendait 9 fiches). La queue est
+        justement là où se cache l'oubli d'échelle.
+      - Trous d'UNE page ignorés (MIN_PAGES_TROU_SIGNALE) : un séparateur hors-projet,
+        pas une fiche.
+
+    Indice au critique, JAMAIS une donnée assénée : ce n'est pas le cross-check
+    `set(1..N) − ∪segments == PagesHorsProjet` que CLAUDE.md interdit (il se
+    contredit à grande échelle) — on tend des pages à examiner et on laisse le
+    modèle trancher page par page.
+    """
+    couvertes = _pages_couvertes(liste, nb_pages)
     if not couvertes:
         return []
-    return [p for p in range(min(couvertes), max(couvertes) + 1) if p not in couvertes]
+    bruts = [p for p in range(min(couvertes), nb_pages + 1) if p not in couvertes]
+    # Ne garder que les pages d'un bloc contigu ≥ MIN_PAGES_TROU_SIGNALE.
+    signales, bloc = [], []
+    for p in bruts:
+        if bloc and p == bloc[-1] + 1:
+            bloc.append(p)
+        else:
+            if len(bloc) >= MIN_PAGES_TROU_SIGNALE:
+                signales.extend(bloc)
+            bloc = [p]
+    if len(bloc) >= MIN_PAGES_TROU_SIGNALE:
+        signales.extend(bloc)
+    return signales
 
 
 def _audit_propre(critique):
@@ -582,25 +623,50 @@ def _ajouter_manquants(liste, critique):
     return garde
 
 
-def _assainir_critique(critique, nb_candidats):
+def _premiere_page_couverte(liste):
+    """Plus petite PageDebut valide de la liste, ou None si aucune."""
+    debuts = [s.get("PageDebut") for s in liste or []
+              if isinstance(s.get("PageDebut"), int)
+              and not isinstance(s.get("PageDebut"), bool)]
+    return min(debuts) if debuts else None
+
+
+def _assainir_critique(critique, liste):
     """
-    Nettoie un audit AVANT tout usage (raffinement ou filet). Ne garde que des
-    `superflus` d'index valides, et JETTE tous les superflus si leur nombre
-    dépasse `SEUIL_SUPERFLUS × nb_candidats` : au-delà, le modèle a pris
-    `superflus` pour un journal de vérification et y a versé des entrées
-    correctes (observé en direct). Les `manquants` passent tels quels — ajouter à
-    tort ne fait qu'un fantôme, retirer à tort perd un projet. C'est ce garde-fou
-    qui interdit à un audit égaré de vider la liste.
+    Nettoie un audit AVANT tout usage (raffinement ou filet no-loss).
+
+      - `superflus` : ne garde que des index valides, et JETTE tous les superflus si
+        leur nombre dépasse `SEUIL_SUPERFLUS × len(liste)` — au-delà, le modèle a
+        pris `superflus` pour un journal de vérification et y a versé des entrées
+        CORRECTES (observé : un audit rendant les 8 entrées correctes en superflus,
+        motif « cette entrée est correcte »). Ce garde-fou interdit à un audit égaré
+        de vider la liste.
+      - `manquants` : rejette ceux dont la page tombe AVANT la première fiche — c'est
+        le préambule (spécimen « fiche-type » p.4) que le vérificateur re-proposait
+        en fantôme sur le medium. Cohérent avec l'exclusion de tête de
+        `_trous_de_couverture`.
+
+    Asymétrie voulue : ajouter à tort ne fait qu'un fantôme (droppable), retirer à
+    tort perd un projet. D'où : on borne fort les superflus, on ne filtre des
+    manquants que le préambule.
     """
     if not critique:
         return critique
+    nb_candidats = len(liste or [])
     superflus = [c for c in (critique.get("superflus") or [])
                  if isinstance(c.get("index"), int)
                  and not isinstance(c.get("index"), bool)
                  and 0 <= c["index"] < nb_candidats]
     if len(superflus) > SEUIL_SUPERFLUS * nb_candidats:
         superflus = []
-    return {"manquants": critique.get("manquants") or [], "superflus": superflus}
+    premiere = _premiere_page_couverte(liste)
+    manquants = critique.get("manquants") or []
+    if premiere is not None:
+        manquants = [m for m in manquants
+                     if not (isinstance(m.get("page_debut"), int)
+                             and not isinstance(m.get("page_debut"), bool)
+                             and m["page_debut"] < premiere)]
+    return {"manquants": manquants, "superflus": superflus}
 
 
 def valider_segment(segment, nb_pages):
@@ -995,13 +1061,14 @@ def _segmenter(client, charge_ocr, ctx, *, progress_callback=None):
     """
     Découpe le recueil en fiches. Renvoie (segments, model, usage).
 
-    Stratégie (Task 7) : énumérer les projets sur le DOCUMENT ENTIER, puis une
-    boucle vérifier→raffiner (≤ MAX_ITER_SEGMENTATION) qui corrige omissions et
-    entrées superflues. Le fenêtrage est abandonné : découper l'espace ne rattrape
-    pas une fiche oubliée DANS une fenêtre (mesuré) ; l'auto-critique, si. Les
-    bornes restées approximatives ici seront affinées par la localisation par REX
-    (étape D). Le seam — signature et (segments, model, usage) — ne bouge pas,
-    donc traiter_document / relancer / eval_corpus ignorent la boucle.
+    Stratégie : énumérer les projets sur le DOCUMENT ENTIER (Medium, stable), puis
+    une boucle vérifier→raffiner (≤ MAX_ITER_SEGMENTATION) qui rattrape omissions
+    (via `_trous_de_couverture` : trous intérieurs ET queue, ≥ MIN_PAGES_TROU_SIGNALE)
+    et entrées superflues. Le fenêtrage est abandonné : découper l'espace ne rattrape
+    pas une fiche oubliée DANS une fenêtre (mesuré) ; sur Medium la boucle est surtout
+    un filet, l'énumération brute étant déjà stable. Le seam — signature et
+    (segments, model, usage) — ne bouge pas, donc traiter_document / relancer /
+    eval_corpus ignorent la boucle.
     """
     pages = _payload_pages(charge_ocr)
     nb_pages = len(pages)
@@ -1013,7 +1080,7 @@ def _segmenter(client, charge_ocr, ctx, *, progress_callback=None):
 
     critique = None
     for i in range(MAX_ITER_SEGMENTATION):
-        trous = _trous_interieurs(liste, nb_pages)
+        trous = _trous_de_couverture(liste, nb_pages)
         _avancer(progress_callback, "segmentation",
                  0.4 + 0.5 * i / MAX_ITER_SEGMENTATION,
                  f"Vérification du découpage ({len(liste)} fiche(s))…")
@@ -1021,7 +1088,7 @@ def _segmenter(client, charge_ocr, ctx, *, progress_callback=None):
             client, _contenu_verification(pages, liste, trous), ctx)
         usage_cumuler(usage_total, u)
         model = model or m
-        critique = _assainir_critique(critique, len(liste))
+        critique = _assainir_critique(critique, liste)
         if _audit_propre(critique):
             critique = None          # convergé : rien à forcer en fin de boucle
             break

@@ -3,10 +3,10 @@ Segmentation par énumération + boucle vérifier→raffiner — la logique qui 
 la paresse du modèle sur les longs recueils. Aucun appel API : toutes les fonctions
 sous test sont pures ou tournent contre un faux client scripté.
 
-Helpers purs (`_trous_interieurs`, `_audit_propre`, `_ajouter_manquants`,
+Helpers purs (`_trous_de_couverture`, `_audit_propre`, `_ajouter_manquants`,
 `_assainir_critique`) et intégration de `_segmenter` contre un faux client scripté
 qui joue énumérations et audits dans l'ordre. C'est la logique qu'aucun test
-n'exerçait quand le recueil de 129 pages a rendu 10 fiches au lieu de ~26 — et que
+n'exerçait quand le recueil de 129 pages a rendu 9 fiches au lieu de ~29 — et que
 le test de groupe `eval_corpus.py` mesure en live.
 """
 import json
@@ -31,33 +31,47 @@ def bornes(segments):
 
 
 @pytest.mark.parametrize("liste, nb_pages, attendu", [
-    ([], 5, []),                                    # aucune fiche → aucun indice
+    ([], 5, []),                                     # aucune fiche → aucun indice
     ([seg(1, 5)], 5, []),                            # tout couvert
-    ([seg(2, 3)], 5, []),                            # tête (1) et queue (4,5) écartées
-    ([seg(1, 2), seg(4, 5)], 6, [3]),               # trou intérieur ; queue (6) écartée
-    ([seg(3, 4), seg(1, 2)], 5, []),                # entrées non triées, contiguës
-    ([seg(1, 3), seg(2, 5)], 5, []),                # plages recouvrantes → union
-    ([seg(10, 53), seg(76, 129)], 129, list(range(54, 76))),   # le vrai trou 54-75
-    ([{"PageDebut": None, "PageFin": 3}], 4, []),   # bornes inexploitables ignorées
+    ([seg(2, 3)], 5, [4, 5]),                        # tête (1) écartée ; QUEUE 4-5 gardée (bloc ≥2)
+    ([seg(10, 40)], 129, list(range(41, 130))),      # énumération arrêtée à p.40 → QUEUE 41-129 (le bug des 9 fiches)
+    ([seg(1, 2), seg(4, 5)], 6, []),                 # trou d'1 page (3) et queue d'1 page (6) < MIN_PAGES_TROU_SIGNALE
+    ([seg(1, 2), seg(4, 4), seg(7, 10)], 10, [5, 6]),# trou d'1 page (3) ignoré ; bloc 5-6 gardé
+    ([seg(3, 4), seg(1, 2)], 5, []),                 # entrées non triées, contiguës
+    ([seg(1, 3), seg(2, 5)], 5, []),                 # plages recouvrantes → union
+    ([seg(10, 53), seg(76, 129)], 129, list(range(54, 76))),   # le vrai trou intérieur 54-75
+    ([{"PageDebut": None, "PageFin": 3}], 4, []),    # bornes inexploitables ignorées
 ])
-def test_trous_interieurs(liste, nb_pages, attendu):
-    assert p._trous_interieurs(liste, nb_pages) == attendu
+def test_trous_de_couverture(liste, nb_pages, attendu):
+    assert p._trous_de_couverture(liste, nb_pages) == attendu
 
 
-def test_trous_interieurs_ecarte_le_preambule_de_tete():
+def test_trous_de_couverture_ecarte_le_preambule_de_tete():
     """
-    Régression 129 pages : les pages 1-9 (intro/sommaire/carte) devant la 1re
+    Régression 129 pages : les pages 1-9 (intro/sommaire/carte) DEVANT la 1re
     fiche NE sont PAS offertes — c'est ce qui poussait le vérificateur à les
     promouvoir en 3 fiches fantômes. Seul le trou intérieur 54-75 ressort.
     """
     liste = [seg(10, 53, "début"), seg(76, 129, "fin")]
-    assert p._trous_interieurs(liste, 129) == list(range(54, 76))
+    assert p._trous_de_couverture(liste, 129) == list(range(54, 76))
 
 
-def test_trous_interieurs_borne_inversee_traitee_comme_plage():
+def test_trous_de_couverture_garde_la_queue():
+    """
+    L'inverse du préambule, et LE correctif du bug qui rendait 9 fiches : quand
+    l'énumération s'arrête tôt (p.40 sur 129), TOUTE la queue non couverte est
+    offerte. La version « intérieur seul » d'origine l'écartait (bornée à
+    max(couvertes)) et perdait ~17 projets — la queue est là où l'oubli d'échelle
+    se cache.
+    """
+    assert p._trous_de_couverture([seg(10, 40, "A")], 129) == list(range(41, 130))
+
+
+def test_trous_de_couverture_borne_inversee_traitee_comme_plage():
     """Bornes inversées : réordonnées pour la couverture (seg(5,2) → 2-5), pas
-    écartées — indice conservateur. Couvre {2-5, 8-9} → trou intérieur {6,7}."""
-    assert p._trous_interieurs([seg(5, 2), seg(8, 9)], 10) == [6, 7]
+    écartées — indice conservateur. Couvre {2-5, 8-9} → trou 6-7 (bloc ≥2) ; la
+    queue d'1 page (10) est ignorée (< MIN_PAGES_TROU_SIGNALE)."""
+    assert p._trous_de_couverture([seg(5, 2), seg(8, 9)], 10) == [6, 7]
 
 
 @pytest.mark.parametrize("critique, propre", [
@@ -106,34 +120,54 @@ def crit(manquants=(), superflus=()):
     return {"manquants": list(manquants), "superflus": list(superflus)}
 
 
+def liste_de(n, depart=1):
+    """n segments contigus à partir de `depart` — pour dimensionner l'assainissement
+    (len et 1re page couverte)."""
+    return [seg(depart + i * 2, depart + i * 2 + 1, f"F{i}") for i in range(n)]
+
+
 def test_assainir_jette_un_dump_de_superflus():
     """Plus de la moitié des entrées en superflus = confusion → tous ignorés
     (le bug live : les 8 entrées correctes rendues en superflus)."""
     c = crit(superflus=[{"index": i, "titre": "x", "motif": "correcte"} for i in range(8)])
-    assert p._assainir_critique(c, 8)["superflus"] == []
+    assert p._assainir_critique(c, liste_de(8))["superflus"] == []
 
 
 def test_assainir_garde_une_minorite_de_superflus():
     c = crit(superflus=[{"index": 0, "titre": "carte", "motif": "m"},
                         {"index": 3, "titre": "sommaire", "motif": "m"}])
-    assert [s["index"] for s in p._assainir_critique(c, 8)["superflus"]] == [0, 3]
+    assert [s["index"] for s in p._assainir_critique(c, liste_de(8))["superflus"]] == [0, 3]
 
 
 def test_assainir_ecarte_les_index_hors_bornes_et_non_entiers():
     c = crit(superflus=[{"index": 0}, {"index": 99}, {"index": True}, {"index": "1"}])
     # 0 valide ; 99 hors bornes ; True et "1" non entiers → seul 0 reste (1 ≤ 0.5×5).
-    assert [s["index"] for s in p._assainir_critique(c, 5)["superflus"]] == [0]
+    assert [s["index"] for s in p._assainir_critique(c, liste_de(5))["superflus"]] == [0]
 
 
-def test_assainir_preserve_toujours_les_manquants():
+def test_assainir_preserve_les_manquants_valides():
     c = crit(manquants=[{"page_debut": 3, "page_fin": 4}],
              superflus=[{"index": i} for i in range(9)])       # dump ignoré
-    resultat = p._assainir_critique(c, 9)
+    resultat = p._assainir_critique(c, liste_de(9))            # 1re page = 1, manquant p.3 gardé
     assert len(resultat["manquants"]) == 1 and resultat["superflus"] == []
 
 
+def test_assainir_rejette_les_manquants_de_preambule():
+    """
+    Régression medium : le vérificateur re-proposait le spécimen « fiche-type » p.4
+    (AVANT la 1re fiche) en manquant → fantôme réintroduit après une énumération qui
+    l'excluait à raison. On rejette tout manquant dont la page tombe avant la 1re
+    fiche ; un manquant intérieur/queue légitime passe. Symétrique de l'exclusion de
+    tête de `_trous_de_couverture`.
+    """
+    liste = [seg(10, 14, "1re"), seg(15, 20, "2e")]            # 1re page couverte = 10
+    c = crit(manquants=[{"page_debut": 4, "page_fin": 4, "titre": "fiche-type"},
+                        {"page_debut": 54, "page_fin": 60, "titre": "vrai omis"}])
+    assert [m["titre"] for m in p._assainir_critique(c, liste)["manquants"]] == ["vrai omis"]
+
+
 def test_assainir_none_reste_none():
-    assert p._assainir_critique(None, 5) is None
+    assert p._assainir_critique(None, liste_de(5)) is None
 
 
 # --- Intégration : la boucle _segmenter (faux client scripté) ---------------
@@ -220,10 +254,11 @@ def test_boucle_un_raffinement_rattrape_une_omission():
     assert rev["manquants"][0]["titre"] == "B"
 
 
-def test_boucle_verification_recoit_les_trous_interieurs():
-    """Le contenu d'audit porte l'indice (trous INTÉRIEURS seulement) et la liste
-    candidate indexée. Tête et queue non couvertes ne sont pas offertes."""
-    partiel = [seg(1, 5, "A"), seg(9, 10, "B")]    # trou intérieur 6-8, pas de tête/queue
+def test_boucle_verification_recoit_les_trous_de_couverture():
+    """Le contenu d'audit porte l'indice (trous de couverture : intérieur ET queue,
+    blocs ≥ MIN_PAGES_TROU_SIGNALE) et la liste candidate indexée. La tête non
+    couverte n'est pas offerte."""
+    partiel = [seg(1, 5, "A"), seg(9, 10, "B")]    # trou intérieur 6-8 (bloc de 3), pas de tête
     client = FauxClientBoucle([partiel], [{"manquants": [], "superflus": []}])
     p._segmenter(client, _charge(10), CTX_BOUCLE)
     assert client.contenus_verif[0]["pages_non_couvertes"] == [6, 7, 8]
