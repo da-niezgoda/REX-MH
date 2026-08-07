@@ -1,0 +1,44 @@
+[
+ {
+  "nom": "corpus_1_3rex",
+  "fichier": "corpus_1_3rex.json",
+  "pdf": "corpus_1_3rex.pdf",
+  "rex": 3,
+  "nb_pages": 11
+ },
+ {
+  "nom": "corpus_2_5rex",
+  "fichier": "corpus_2_5rex.json",
+  "pdf": "corpus_2_5rex.pdf",
+  "rex": 5,
+  "nb_pages": 19
+ },
+ {
+  "nom": "corpus_3_8rex",
+  "fichier": "corpus_3_8rex.json",
+  "pdf": "corpus_3_8rex.pdf",
+  "rex": 8,
+  "nb_pages": 29
+ },
+ {
+  "nom": "corpus_4_12rex",
+  "fichier": "corpus_4_12rex.json",
+  "pdf": "corpus_4_12rex.pdf",
+  "rex": 12,
+  "nb_pages": 42
+ },
+ {
+  "nom": "corpus_5_18rex",
+  "fichier": "corpus_5_18rex.json",
+  "pdf": "corpus_5_18rex.pdf",
+  "rex": 18,
+  "nb_pages": 61
+ },
+ {
+  "nom": "corpus_6_24rex",
+  "fichier": "corpus_6_24rex.json",
+  "pdf": "corpus_6_24rex.pdf",
+  "rex": 24,
+  "nb_pages": 79
+ }
+]
