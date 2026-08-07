@@ -109,6 +109,9 @@ def contexte_app():
     st.session_state.REXPrompt = app.load_prompt("REXPrompt.md", st.session_state.REXSchema)
     st.session_state.listPrompt = app.load_prompt("listPrompt.md",
                                                   st.session_state.REXListSchema)
+    st.session_state.REXCheckSchema = app.load_schema("REXcheck.schema.json")
+    st.session_state.verifyPrompt = app.load_prompt("verifyPrompt.md",
+                                                    st.session_state.REXCheckSchema)
     st.session_state.vocabulaire = app.load_vocabulaire()
     # Le vocabulaire peut légitimement être vide (la canonicalisation seule suffit),
     # contrairement aux prompts et aux schémas.

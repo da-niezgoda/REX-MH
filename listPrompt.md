@@ -7,17 +7,19 @@ Un recueil de retours d'expérience contient deux natures de pages, et les disti
 1. les pages **de projet**, qui décrivent une opération concrète menée sur un site précis ;
 2. les pages **hors projet** — introduction, sommaire, listes récapitulatives, cartes, légendes, annexes — qui parlent des projets *en général* ou les *énumèrent*, sans en décrire aucun.
 
-Votre objectif est de produire la liste des projets réels : **ni un projet omis, ni une page hors projet promue en projet**. Les deux erreurs sont graves, et la seconde est la plus fréquente.
+Votre objectif est de produire la liste des projets réels : **ni un projet omis, ni une page hors projet promue en projet**. Les deux erreurs sont graves. Sur un document **court**, promouvoir une page hors projet est l'erreur la plus fréquente. Sur un **long recueil**, c'est l'inverse : **l'omission devient le danger principal**, parce qu'il est tentant de se lasser et d'arrêter avant la fin. Ne concluez jamais avant d'avoir examiné la **dernière page** : un recueil qui présente des dizaines d'opérations en contient des dizaines, et **chacune** doit figurer dans votre liste, du premier au dernier projet.
 
 
 ## Format d'Entrée
 
 Le document d'entrée vous est fourni sous la forme d'un objet JSON unique.
 
-Cet objet contient une liste, où chaque élément représente une page du document et possède deux champs obligatoires :
+Cet objet contient une clé `"pages"` : une liste où chaque élément représente une page du document et possède deux champs obligatoires :
 
 * `"content"`: Une chaîne de caractères contenant le texte intégral de la page.
 * `"page_number"`: Un entier représentant le numéro de la page.
+
+Il peut aussi contenir une clé optionnelle `"revision"` : dans ce cas, ce n'est **pas** un premier passage — voir la section « Révision » plus bas.
 
 
 ## Format de Sortie et Contraintes Strictes
@@ -121,6 +123,19 @@ L'erreur à ne pas commettre serait de produire cinq segments de plus pour les p
  * **Projet Unique** : si le document ne contient qu'un seul projet, produisez un seul segment, qui s'étend de sa première à sa dernière page de projet.
 
  * En cas de doute réel sur une page isolée, rattachez-la au projet en cours plutôt que d'en ouvrir un nouveau : un segment un peu trop large coûte moins cher qu'un projet inventé.
+
+ * **Exhaustivité** : votre liste doit couvrir le document du premier au dernier projet. Si un long intervalle de pages *de projet* ne produit aucun segment, c'est presque toujours une omission de votre part, pas un vide réel — retournez-y. Si le recueil comporte un sommaire (« Liste des actions décrites »), il donne l'**ordre de grandeur** du nombre d'opérations attendues : servez-vous-en comme d'un repère de complétude, sans jamais transformer le sommaire lui-même en projet.
+
+
+## Révision (2e passage et suivants)
+
+Si l'objet d'entrée contient une clé `"revision"`, vous avez déjà produit une liste et un vérificateur l'a auditée. `revision` contient :
+
+* `"liste_precedente"` : votre découpage précédent (Titre + PageDebut + PageFin) ;
+* `"manquants"` : des zones de pages qu'un vérificateur soupçonne d'être des projets que vous avez **omis** ;
+* `"superflus"` : des entrées de votre liste soupçonnées d'être des pages hors projet (sommaire, carte, légende) ou des doublons.
+
+Repartez de votre liste précédente et **corrigez-la** : allez lire les pages des `manquants` et, si ce sont bien des projets, ajoutez-les ; allez relire les `superflus` et, si l'audit a raison, retirez-les. Puis **ré-émettez la liste COMPLÈTE** (pas seulement les corrections). L'audit est une aide, pas un ordre : si vous êtes certain qu'un « manquant » est en réalité un sommaire ou une carte, ne l'ajoutez pas ; si un « superflu » est un vrai projet, gardez-le. Chaque segment retenu doit rester justifiable par son Motif.
 
 
 Votre unique sortie doit être le JSON finalisé qui représente ce découpage complet.

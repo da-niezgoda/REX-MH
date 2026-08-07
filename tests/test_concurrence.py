@@ -1,6 +1,7 @@
 """Canari de concurrence pour pipeline.extraire_fiches — aucun appel API."""
 import json
 
+import httpx
 import pytest
 
 import pipeline as p
@@ -141,3 +142,39 @@ def test_deja_echauffe_saute_la_phase_sequentielle():
     c = client(croiser=True)
     lancer(c, 4, deja_echauffe=True)
     assert c.chat.max_en_vol > 1, c.chat.max_en_vol
+
+
+def test_readtimeout_est_un_timeout_reessayable():
+    """
+    Le `httpx.ReadTimeout` qui a perdu une fiche sur le recueil de 129 pages doit
+    être classé « timeout » réessayable. Le SDK le réessaie bien (c'est une
+    httpx.TimeoutException, retry_connection_errors=True) — encore faut-il que le
+    budget lui en laisse le temps : voir le test d'invariant ci-dessous.
+    """
+    assert p.classer_erreur(httpx.ReadTimeout("read timed out")) == \
+        ("timeout", True, None)
+
+
+@pytest.mark.parametrize(
+    "timeout_ms, retry",
+    [
+        (p.TIMEOUT_EXTRACTION_MS, p.RETRY_EXTRACTION),
+        (p.TIMEOUT_SEGMENTATION_MS, p.RETRY_SEGMENTATION),
+    ],
+)
+def test_budget_de_reessai_depasse_le_timeout(timeout_ms, retry):
+    """
+    INVARIANT : `max_elapsed_time` DOIT dépasser le `timeout_ms` par appel.
+
+    Sinon un unique délai d'attente épuise tout le budget avant le moindre
+    réessai : `retry_with_backoff` abandonne dès que « écoulé > max_elapsed_time ».
+    Avec 120 s == 120 s, le premier ReadTimeout n'était jamais réessayé — c'est ce
+    qui a transformé un délai d'attente en fiche perdue sur le recueil de 129
+    pages. On exige de la marge pour au moins une tentative de plus.
+    """
+    assert retry.retry_connection_errors, \
+        "un délai d'attente/coupure réseau doit être réessayable"
+    assert retry.backoff.max_elapsed_time > timeout_ms, (
+        f"budget de réessai {retry.backoff.max_elapsed_time} ms <= timeout par "
+        f"appel {timeout_ms} ms : un délai d'attente ne serait jamais réessayé"
+    )

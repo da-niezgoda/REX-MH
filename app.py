@@ -33,7 +33,8 @@ load_dotenv()
 
 # Clés de session portant les prompts et schémas, vidées par le bouton de
 # rechargement (ils sont chargés une fois par session, pas par rerun).
-CLES_PROMPTS = ("REXSchema", "REXListSchema", "REXPrompt", "listPrompt", "vocabulaire")
+CLES_PROMPTS = ("REXSchema", "REXListSchema", "REXCheckSchema", "REXPrompt",
+                "listPrompt", "verifyPrompt", "vocabulaire")
 
 
 # Configure page
@@ -62,9 +63,13 @@ def _cle_fichier(path):
     return str(path), os.path.getmtime(path)
 
 
-# Le thème vit désormais dans .streamlit/config.toml (tâche 4), atteint tous les
-# widgets natifs sans iframe, et remplace la feuille de style injectée. Plus de
-# load_css ni de styles.css : une seule source de vérité pour l'apparence.
+# Le socle du thème vit dans .streamlit/config.toml (palette, rayons, couleurs de
+# tableau — atteint tous les widgets natifs sans iframe). styles.css n'ajoute que
+# le polissage Material 3 Expressive que le thème natif ne sait pas exprimer :
+# en-tête en dégradé, cartes, métriques en cartes, boutons.
+def load_css(fichier):
+    """Injecte le polissage M3 Expressive par-dessus le thème natif."""
+    st.html(f"<style>{load_text_file(*_cle_fichier(fichier))}</style>")
 
 
 def load_schema(schema_name):
@@ -212,8 +217,10 @@ def _contexte_extraction():
     """
     prompt_extraction = st.session_state.REXPrompt
     prompt_segmentation = st.session_state.listPrompt
+    prompt_verification = st.session_state.verifyPrompt
     schema_rex = st.session_state.REXSchema
     schema_liste = st.session_state.REXListSchema
+    schema_check = st.session_state.REXCheckSchema
     vocabulaire = st.session_state.get("vocabulaire") or {}
     index_conformite, problemes = conformite.construire_index(schema_rex, vocabulaire)
     return {
@@ -232,6 +239,11 @@ def _contexte_extraction():
         ),
         "cle_cache_segmentation": pipeline.cle_cache_prompt(
             "segmentation", prompt_segmentation, MODEL_SEGMENTATION
+        ),
+        "prompt_verification": prompt_verification,
+        "format_verification": json_schema_format("rex_verification", schema_check),
+        "cle_cache_verification": pipeline.cle_cache_prompt(
+            "verification", prompt_verification, MODEL_SEGMENTATION
         ),
         "hash_prompt_extraction": pipeline.empreinte(prompt_extraction),
         "hash_prompt_segmentation": pipeline.empreinte(prompt_segmentation),
@@ -315,25 +327,25 @@ def actualiser_travail_par_lot(job_id):
 
 
 def process_uploaded_file(file, filename, mode="rapide"):
-    """Traite un PDF déposé, avec progression par étapes (st.status)."""
-    with st.status("Traitement en cours…", expanded=True) as statut:
-        barre = st.progress(0)
+    """Traite un PDF déposé, avec une barre de progression visible."""
+    # Barre pleine largeur, le message d'étape porté par la barre elle-même
+    # (st.status laissait un cadre vide et sa barre interne débordait des coins).
+    barre = st.progress(0.0, text="⏳ Démarrage du traitement…")
 
-        def update_progress(progress, message, **_):
-            # **_ absorbe les détails (phase, faits, total, echecs) du pipeline.
-            barre.progress(max(0.0, min(1.0, progress)))
-            statut.update(label=message)
+    def update_progress(progress, message, **_):
+        # **_ absorbe les détails (phase, faits, total, echecs) du pipeline.
+        barre.progress(max(0.0, min(1.0, progress)), text=message)
 
-        try:
-            resultat = parse_pdf_document(file, filename,
-                                         progress_callback=update_progress, mode=mode)
-        except Exception as e:
-            statut.update(label=f"Erreur : {e}", state="error")
-            st.error(f"Erreur lors du traitement : {e}")
-            return
+    try:
+        resultat = parse_pdf_document(file, filename,
+                                     progress_callback=update_progress, mode=mode)
+    except Exception as e:
+        barre.empty()
+        st.error(f"Erreur lors du traitement : {e}")
+        return
 
-        etat = "error" if resultat.get("statut") == "echec" else "complete"
-        statut.update(label="Traitement terminé", state=etat, expanded=False)
+    # La barre s'efface ; le bilan (succès, conformité, métriques) prend le relais.
+    barre.empty()
 
     if resultat["run_id"]:
         st.session_state.last_parsed_data = {
@@ -367,83 +379,109 @@ def _afficher_bilan(resultat):
     elif echecs:
         st.warning(f"⚠️ {nb} fiche(s) extraite(s), {echecs} en échec.")
     else:
-        st.success(f"✅ Document traité — {nb} fiche(s) extraite(s).")
+        st.success("✅ Document traité.")
 
-    if resultat.get("ocr_cache_hit"):
-        st.caption("OCR servi depuis le cache : aucun appel OCR facturé.")
+    # Les cartes (REX / conformité / jetons) sont désormais rendues par
+    # display_results_table, à partir de l'état rechargeable, pour qu'elles
+    # survivent à une relance. Ici on ne garde que le détail des recalages.
     _afficher_conformite(resultat.get("conformite"))
-    _afficher_usage(resultat.get("usage"))
 
 
 def _afficher_conformite(bilan):
     """
-    Tableau de bord de la dérive. Si les recalages augmentent après une édition de
-    prompt, cela se voit ici — et non six mois plus tard dans un courriel du
-    client.
+    Détail de la dérive (recalages d'énumération), en popover — seulement s'il y
+    en a. Si les recalages augmentent après une édition de prompt, cela se voit
+    ici. Le taux de conformité lui-même est désormais une carte (voir plus haut).
     """
-    if not bilan:
+    if not bilan or not bilan.get("par_regle"):
         return
-    total = sum(bilan.get(statut, 0) for statut in conformite.STATUTS)
-    if not total:
-        return
-    morceaux = [f"{bilan.get('conforme', 0)} conforme(s)"]
-    if bilan.get("corrige"):
-        morceaux.append(f"{bilan['corrige']} corrigée(s)")
-    if bilan.get("non_conforme"):
-        morceaux.append(f"{bilan['non_conforme']} non conforme(s)")
-    ligne = " · ".join(morceaux)
-    if bilan.get("recalages"):
-        ligne += f" — {bilan['recalages']} recalage(s) d'énumération"
-    (st.warning if bilan.get("non_conforme") else st.caption)(f"Conformité : {ligne}")
-
-    if bilan.get("par_regle"):
-        with st.popover("Détail des recalages", use_container_width=False):
-            st.caption(
-                "Chaque recalage est une valeur du modèle ramenée à une valeur du "
-                "vocabulaire contrôlé. Une hausse signale une dérive du prompt ou "
-                "du schéma, pas une amélioration."
-            )
-            for regle, n in sorted(bilan["par_regle"].items(),
-                                   key=lambda kv: -kv[1]):
-                st.write(f"- `{regle}` : {n}")
+    with st.popover("Détail des recalages", use_container_width=False):
+        st.caption(
+            "Chaque recalage est une valeur du modèle ramenée à une valeur du "
+            "vocabulaire contrôlé. Une hausse signale une dérive du prompt ou "
+            "du schéma, pas une amélioration."
+        )
+        for regle, n in sorted(bilan["par_regle"].items(), key=lambda kv: -kv[1]):
+            st.write(f"- `{regle}` : {n}")
 
 
-def _afficher_usage(usage):
-    """Consommation du run, avec le taux de cache de prompt effectif."""
-    if not usage:
+def _carte_metrique(col, icone, libelle, valeur, aide=""):
+    """
+    Carte de résultat avec une grande icône Material en filigrane. Contenu 100 %
+    statique (des nombres), donc st.html convient. L'icône est un nom Material
+    Symbols (ligature), rendu via la police chargée par styles.css.
+    """
+    titre = f' title="{aide}"' if aide else ""
+    col.html(
+        f'<div class="rex-metric"{titre}>'
+        f'<span class="material-symbols-outlined rex-metric-bg">{icone}</span>'
+        f'<div class="rex-metric-val">{valeur}</div>'
+        f'<div class="rex-metric-lbl">{libelle}</div>'
+        "</div>"
+    )
+
+
+def _afficher_cartes(data):
+    """
+    Bandeau de quatre cartes — nombre de REX, taux de conformité, jetons en
+    entrée et en sortie.
+
+    Calculé depuis des données RECHARGEABLES (les projets en session + les
+    totaux du run en base), et non depuis le résultat éphémère d'un traitement.
+    C'est ce qui les fait survivre à une relance ou à un rechargement : liées
+    au seul `process_uploaded_file`, elles disparaissaient au premier rerun.
+    Les jetons sont les totaux du run (segmentation comprise), seuls chiffres
+    durablement en base — et ils cumulent le coût d'une relance, ce qui est
+    correct.
+    """
+    projects = data.get("projects") or []
+    if not projects:
         return
-    extraction = usage.get("extraction") or {}
-    if not extraction.get("appels"):
-        return
-    taux = pipeline.taux_cache(extraction)
-    colonnes = st.columns(4)
-    colonnes[0].metric("Appels d'extraction", extraction["appels"])
-    colonnes[1].metric("Jetons de prompt", f"{extraction['prompt_tokens']:,}".replace(",", " "))
-    colonnes[2].metric("Servis par le cache", f"{taux:.0%}",
-                       help="Ces jetons sont facturés 10 % du tarif normal.")
-    colonnes[3].metric("Jetons générés",
-                       f"{extraction['completion_tokens']:,}".replace(",", " "))
+    verdicts = [p.get("_validation_status") for p in projects]
+    evalues = [v for v in verdicts if v]
+    pct = f"{verdicts.count('conforme') / len(evalues):.0%}" if evalues else "—"
+    run = store.get_run(data["run_id"]) if data.get("run_id") else None
+    espace = lambda n: f"{n or 0:,}".replace(",", " ")  # noqa: E731
+    cols = st.columns(4)
+    _carte_metrique(cols[0], "article", "REX extraites", len(projects))
+    _carte_metrique(cols[1], "verified", "Conformité", pct)
+    _carte_metrique(cols[2], "input", "Jetons en entrée",
+                    espace((run or {}).get("prompt_tokens")))
+    _carte_metrique(cols[3], "output", "Jetons en sortie",
+                    espace((run or {}).get("completion_tokens")))
 
 
 def display_dashboard():
-    """En-tête de l'application, en éléments natifs (plus de bannière HTML)."""
-    st.title("🌿 REX Zones Humides")
-    st.caption("Extraction de retours d'expérience depuis un recueil PDF")
+    """En-tête de l'application : bannière en dégradé (contenu statique)."""
+    # Contenu 100 % statique, aucune donnée utilisateur interpolée : st.html
+    # convient (il ignore le JS de toute façon). Le style vit dans styles.css.
+    st.html(
+        '<div class="rex-header">'
+        '<span class="rex-emoji">🌿</span>'
+        '<div><h1>REX Zones Humides</h1>'
+        "<p>Extraction de retours d'expérience depuis un recueil PDF</p></div>"
+        "</div>"
+    )
 
 
 
+# (emoji, titre, couleur). La couleur teinte l'en-tête de section (badge coloré
+# via la syntaxe markdown native de Streamlit) — de la couleur, sans HTML.
 SECTION_META = {
-    "Presentation": ("📋", "Informations du projet"),
-    "Objectif": ("🎯", "Objectif du maître d'ouvrage"),
-    "Description": ("📝", "Description"),
-    "Enjeux": ("🌱", "Enjeux eau, biodiversité et climat"),
-    "Typologie": ("🔧", "Typologie — ingénierie écologique"),
-    "Directives": ("🇪🇺", "Référence directives européennes"),
-    "Contexte": ("⚖️", "Contexte réglementaire"),
-    "Valorisation": ("🏆", "Valorisation de l'opération"),
-    "Travaux": ("🗺️", "Période et envergure des travaux"),
-    "Documents": ("📚", "Documents"),
+    "Presentation": ("📋", "Informations du projet", "blue"),
+    "Objectif": ("🎯", "Objectif du maître d'ouvrage", "orange"),
+    "Description": ("📝", "Description", "violet"),
+    "Enjeux": ("🌱", "Enjeux eau, biodiversité et climat", "green"),
+    "Typologie": ("🔧", "Typologie — ingénierie écologique", "gray"),
+    "Directives": ("🇪🇺", "Référence directives européennes", "blue"),
+    "Contexte": ("⚖️", "Contexte réglementaire", "orange"),
+    "Valorisation": ("🏆", "Valorisation de l'opération", "red"),
+    "Travaux": ("🗺️", "Période et envergure des travaux", "green"),
+    "Documents": ("📚", "Documents", "gray"),
 }
+
+# Titre de section → couleur du badge, dérivé de SECTION_META (titres uniques).
+_COULEUR_SECTION = {titre: couleur for _, titre, couleur in SECTION_META.values()}
 
 # Libellés d'affichage, par « Section/champ ». La STRUCTURE et l'ORDRE viennent
 # du schéma (SECTIONS + REX.schema.json) ; seuls les libellés humains vivent ici,
@@ -527,7 +565,8 @@ def blocs_de_fiche(project):
         donnees = project.get(section) if project else None
         if not isinstance(donnees, dict) or not any(donnees.values()):
             continue
-        emoji, titre = SECTION_META.get(section, ("", section))
+        meta = SECTION_META.get(section)
+        emoji, titre = (meta[0], meta[1]) if meta else ("", section)
         champs = []
         for champ, valeur in donnees.items():
             texte = _valeur_affichable(valeur)
@@ -555,8 +594,10 @@ def rendre_fiche(project):
         st.info("Aucune donnée disponible pour cette fiche.")
         return
     for emoji, titre, champs in blocs:
+        couleur = _COULEUR_SECTION.get(titre, "gray")
         with st.container(border=True):
-            st.markdown(f"##### {emoji} {titre}".strip())
+            # En-tête de section en badge coloré (markdown natif, sans HTML).
+            st.markdown(f":{couleur}-background[**{emoji}  {titre}**]")
             for libelle, texte, est_lien in champs:
                 if est_lien:
                     st.markdown(f"**{libelle} :** [{texte}]({texte})")
@@ -564,14 +605,15 @@ def rendre_fiche(project):
                     st.markdown(f"**{libelle} :** {texte}")
 
 
-MODES = {
-    "rapide": "⚡ Rapide — résultats immédiats",
-    "economique": "🐢 Économique — 50 % moins cher, résultats différés",
-}
+# Mode de traitement : « rapide » (parallèle, immédiat) est le seul exposé — le
+# choix rapide/économique était une décision technique inutile pour l'usager. Le
+# mode « economique » (API par lot) reste dans le pipeline et l'historique, mais
+# n'est plus proposé au dépôt.
+MODE_DEFAUT = "rapide"
 
 
 def display_file_upload():
-    """Dépôt d'un PDF et choix du mode de traitement."""
+    """Dépôt d'un PDF, traité en mode rapide."""
     st.markdown("### 📤 Importer un nouveau document PDF")
 
     uploaded_file = st.file_uploader(
@@ -586,41 +628,26 @@ def display_file_upload():
     contenu = uploaded_file.getvalue()
     sha = pipeline.sha256_fichier(contenu)
 
-    mode = st.radio(
-        "Mode de traitement",
-        options=list(MODES),
-        format_func=lambda m: MODES[m],
-        horizontal=True,
-        key="mode_traitement",
-        help=(
-            "Rapide : les fiches sont extraites en parallèle et s'affichent tout "
-            "de suite. Économique : l'extraction part en traitement par lot chez "
-            "Mistral (moitié prix), les résultats se récoltent plus tard depuis "
-            "l'onglet Historique — vous pouvez fermer la page."
-        ),
-    )
-
-    col1, col2 = st.columns([1, 4])
+    col1, col2 = st.columns([1, 4], vertical_alignment="center")
     with col1:
         # Garde-fou d'interface contre le double clic. Le vrai garde-fou est en
         # base (index partiel « un seul run en cours par document ») : deux
         # onglets ne peuvent pas facturer deux fois le même PDF.
         deja = st.session_state.get("_dernier_envoi")
-        if st.button("📤 Envoyer", key="upload_btn",
-                     disabled=(deja == (sha, mode))):
-            st.session_state["_dernier_envoi"] = (sha, mode)
-            process_uploaded_file(contenu, uploaded_file.name, mode=mode)
-
+        envoyer = st.button("📤 Envoyer", key="upload_btn", type="primary",
+                            disabled=(deja == (sha, MODE_DEFAUT)))
     with col2:
         st.info(
             f"Fichier sélectionné : {uploaded_file.name} "
             f"({uploaded_file.size / 1024:.0f} Ko)"
         )
-        if store.has_ocr_payload_pour_sha(sha):
-            st.caption(
-                "Ce document a déjà été océrisé : l'OCR sera repris du cache, "
-                "sans nouvel appel facturé."
-            )
+
+    # Le traitement (barre de progression, bilan, métriques) est rendu PLEINE
+    # LARGEUR, hors des colonnes : dans la colonne étroite du bouton, la barre et
+    # les 4 métriques étaient écrasées et désalignées.
+    if envoyer:
+        st.session_state["_dernier_envoi"] = (sha, MODE_DEFAUT)
+        process_uploaded_file(contenu, uploaded_file.name, mode=MODE_DEFAUT)
 
 
 # Sections du schéma, dans l'ordre d'apparition dans REX.schema.json.
@@ -744,13 +771,18 @@ def _nom_export(filename):
     return f"{base}_REX_export.xlsx"
 
 
+def _selectionner_fiche(index):
+    """Callback du clic sur une fiche : mémorise la sélection avant le rerun."""
+    st.session_state["fiche_active"] = index
+
+
 @st.fragment
 def display_results_table():
     """
-    Tableau natif des fiches extraites ; sélectionner une ligne affiche son
-    détail dessous (rendu natif, schéma → LIBELLES). Fragment : la sélection
-    ne rejoue que ce bloc, pas toute la page. Remplace st_mui_table (iframe,
-    non maintenu) et sa CSS dupliquée.
+    Résultats en deux volets : à gauche la liste des fiches (une par bouton
+    pleine largeur, cliquable en entier, la sélectionnée en surbrillance) ; à
+    droite, côte à côte, le détail de la fiche choisie (rendu natif par section,
+    schéma → LIBELLES). Fragment : cliquer une fiche ne rejoue que ce bloc.
     """
     if 'last_parsed_data' not in st.session_state:
         return
@@ -761,41 +793,58 @@ def display_results_table():
         return
 
     st.divider()
-    st.subheader(f"📊 Résultats — {data['filename']}")
-    st.caption(f"{len(projects)} projet(s) extrait(s) · {data['date']}")
+    entete = st.columns([2, 1], vertical_alignment="center")
+    with entete[0]:
+        st.subheader(f"📊 Résultats — {data['filename']}")
+        st.caption(data['date'])
+    with entete[1]:
+        # Génération différée : le classeur n'est construit qu'au clic. Bouton
+        # primaire, pleine largeur de sa colonne, agrandi via styles.css.
+        st.download_button(
+            label="📥 Télécharger l'export Excel",
+            data=functools.partial(create_excel_download, projects),
+            file_name=_nom_export(data['filename']),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Télécharger les données extraites au format Excel",
+            key="dl_excel_resultats",
+            type="primary",
+            width="stretch",
+        )
 
-    # Génération différée : le classeur n'est construit qu'au clic. Il l'était
-    # jusqu'ici à chaque rerun, que l'utilisateur télécharge ou non.
-    st.download_button(
-        label="📥 Télécharger en Excel",
-        data=functools.partial(create_excel_download, projects),
-        file_name=_nom_export(data['filename']),
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        help="Télécharger les données extraites au format Excel",
-        key="dl_excel_resultats",
-    )
+    # Bandeau de synthèse, calculé depuis l'état rechargeable : persiste après
+    # une relance (contrairement aux cartes d'après-traitement d'autrefois).
+    _afficher_cartes(data)
 
-    lignes = [{
-        "Titre du projet": _titre_de_fiche(project, idx),
-        "Page début": project.get("_page_debut"),
-        "Page fin": project.get("_page_fin"),
-        "Conformité": _libelle_verdict(project.get("_validation_status")),
-    } for idx, project in enumerate(projects)]
+    idx = min(st.session_state.get("fiche_active", 0), len(projects) - 1)
 
-    etat = st.dataframe(
-        pd.DataFrame(lignes),
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        # Sans key stable, la sélection serait perdue à chaque rerun.
-        key="tableau_resultats",
-    )
+    col_liste, col_detail = st.columns([2, 3], gap="large")
 
-    # Accès par item (dict) : la valeur de retour de st.dataframe est un dict.
-    rows = etat["selection"]["rows"] if etat and "selection" in etat else []
-    idx = rows[0] if rows else 0
-    st.markdown(f"#### 📄 {_titre_de_fiche(projects[idx], idx)}")
-    rendre_fiche(projects[idx])
+    with col_liste:
+        st.markdown(f"**{len(projects)} fiche(s)**")
+        # Une fiche = un bouton pleine largeur (toute la ligne est cliquable),
+        # la fiche active en `primary` (rempli), les autres en `secondary`.
+        for i, project in enumerate(projects):
+            titre = _titre_de_fiche(project, i)
+            debut, fin = project.get("_page_debut"), project.get("_page_fin")
+            verdict = _libelle_verdict(project.get("_validation_status"))
+            st.button(
+                f"📄 {titre}",
+                key=f"fiche_btn_{i}",
+                width="stretch",
+                type="primary" if i == idx else "secondary",
+                on_click=_selectionner_fiche, args=(i,),
+            )
+            # Sous-ligne discrète : pages en gris, verdict coloré (le libellé
+            # porte déjà son émoji ✅/✏️/⚠️).
+            st.markdown(
+                f"<div style='margin:-0.4rem 0 0.6rem 0.4rem;font-size:0.82rem;"
+                f"opacity:0.8'>p. {debut}–{fin} · {verdict}</div>",
+                unsafe_allow_html=True,
+            )
+
+    with col_detail:
+        st.markdown(f"#### 📄 {_titre_de_fiche(projects[idx], idx)}")
+        rendre_fiche(projects[idx])
 
 
 def display_failures_panel():
@@ -1040,36 +1089,15 @@ def _construire_archive(inclure_ocr):
                                mistralai_version=pipeline.version_mistralai())
 
 
-def page_maintenance():
-    """Écran de maintenance : rechargement des prompts/schémas, état de l'app."""
-    st.subheader("⚙️ Maintenance")
-    st.caption(
-        "Recharge les prompts Markdown, les schémas JSON et le vocabulaire "
-        "depuis le disque. Nécessaire après avoir édité REXPrompt.md, "
-        "listPrompt.md, REX.schema.json, REXlist.schema.json ou "
-        "vocabulary.json : ils sont chargés une fois par session, donc un "
-        "simple rerun ne suffit pas."
-    )
-    if st.button("♻️ Recharger prompts et schémas", key="recharger_prompts"):
-        for cle in CLES_PROMPTS:
-            st.session_state.pop(cle, None)
-        load_text_file.clear()
-        st.toast("Prompts, schémas et vocabulaire rechargés")
-        st.rerun()
-
-    # Un alias qui vise une valeur absente de l'énumération n'est pas une
-    # erreur fatale — « Site Natura 2000 » n'existe pas encore dans
-    # Contexte.contexte, et c'est la tâche 5 qui l'ajoutera. Mais il ne doit
-    # pas rester invisible, sinon un alias mal orthographié ne se recale
-    # jamais sans que personne ne le sache.
-    problemes = conformite.construire_index(
-        st.session_state.REXSchema, st.session_state.get("vocabulaire") or {})[1]
-    if problemes:
-        st.warning("Vocabulaire — " + str(len(problemes)) + " point(s) à revoir :")
-        for probleme in problemes:
-            st.caption(f"• {probleme}")
-
-    st.caption(f"Base d'historique : `{store.db_path() or get_db_path()}`")
+def _barre_laterale():
+    """Pied de la barre latérale, sous le rail de navigation (stylé en CSS)."""
+    with st.sidebar:
+        st.divider()
+        st.caption(
+            "Transforme un recueil PDF de zones humides en fiches REX "
+            "structurées, prêtes à exporter en Excel."
+        )
+        st.caption("OiEau · OFB")
 
 
 def _charger_prompts_et_schemas():
@@ -1106,6 +1134,19 @@ def _charger_prompts_et_schemas():
             st.error("Chargement de listPrompt.md impossible.")
             st.stop()
 
+    if 'REXCheckSchema' not in st.session_state:
+        st.session_state.REXCheckSchema = load_schema('REXcheck.schema.json')
+        if not st.session_state.REXCheckSchema:
+            st.error("Chargement de REXcheck.schema.json impossible.")
+            st.stop()
+
+    if 'verifyPrompt' not in st.session_state:
+        st.session_state.verifyPrompt = load_prompt('verifyPrompt.md',
+                                                    st.session_state.REXCheckSchema)
+        if not st.session_state.verifyPrompt:
+            st.error("Chargement de verifyPrompt.md impossible.")
+            st.stop()
+
     # Absent ou vide, le vocabulaire n'empêche rien : la canonicalisation résout
     # déjà la casse, les accents, les apostrophes et les pluriels sans alias. Pas
     # de st.stop() donc.
@@ -1130,6 +1171,10 @@ def main():
     _charger_prompts_et_schemas()
     store.init_db(get_db_path())
 
+    load_css("styles.css")
+    # Logo OiEau en tête de la barre latérale (emplacement dédié, au-dessus du
+    # rail de navigation).
+    st.logo("oieau_logo.png", size="large", link="https://www.oieau.org")
     # En-tête global, affiché au-dessus de chaque écran.
     display_dashboard()
 
@@ -1137,9 +1182,10 @@ def main():
         st.Page(page_traitement, title="Traitement",
                 icon=":material/upload_file:", default=True),
         st.Page(page_historique, title="Historique", icon=":material/history:"),
-        st.Page(page_maintenance, title="Maintenance", icon=":material/settings:"),
     ]
-    st.navigation(pages).run()
+    nav = st.navigation(pages)
+    _barre_laterale()
+    nav.run()
 
 
 if __name__ == "__main__":

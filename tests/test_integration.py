@@ -181,8 +181,10 @@ def test_persistance_du_run(parcours):
     assert run["model_ocr"] == "mistral-ocr-4-0"
     assert run["model_extraction"] == "mistral-medium-2508"
     assert run["prompt_extraction_sha256"] and run["schema_rex_sha256"]
-    # 5 extractions + 1 segmentation
-    assert run["prompt_tokens"] == JETONS_PROMPT * (NB_FICHES + 1)
+    # 5 extractions + 2 appels de segmentation (énumération + vérification, Task 7).
+    # Le faux client rend {"Liste": …} à l'audit aussi, donc « ni manquant ni
+    # superflu » : la boucle converge au premier tour, exactement 2 appels.
+    assert run["prompt_tokens"] == JETONS_PROMPT * (NB_FICHES + 2)
     assert len(store.list_fiches(parcours.res["run_id"])) == NB_SEGMENTS
     assert len(store.load_failures(parcours.res["run_id"])) == 2
 

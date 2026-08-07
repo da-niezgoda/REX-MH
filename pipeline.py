@@ -82,27 +82,60 @@ MAX_CONCURRENCE_EXTRACTION = 4
 # d'1. À ce volume, c'est négligeable.
 SEUIL_ECHAUFFEMENT = 3
 
+# Segmentation par ÉNUMÉRATION + boucle vérifier→raffiner (voir `_segmenter`).
+#
+# Le petit modèle segmente parfaitement 18 pages (2 fiches, score 1.0) mais se
+# « perd au milieu » d'un document long : sur le recueil de 129 pages, l'appel
+# unique rendait 10 fiches, propres jusqu'à la p.40 puis un saut direct à 128-129
+# (~17 fiches escamotées). Ce n'est PAS un manque de contexte (90 k jetons tiennent
+# dans la fenêtre) mais une paresse d'attention. Le fenêtrage glissant, essayé
+# avant, relevait le plancher mais plafonnait en rappel (corpus à 24 fiches : 1
+# projet perdu) — découper l'espace ne rattrape pas une fiche oubliée DANS une
+# fenêtre. On énumère donc sur le document entier, puis une boucle d'auto-critique
+# rattrape omissions (via les trous INTÉRIEURS de couverture) et entrées superflues.
+#
+# Plafond de la boucle de correction ; au-delà, on force le dernier audit assaini
+# (filet no-loss). Mesuré : 6/6 corpus « propres », 27 fiches réelles sur le recueil.
+MAX_ITER_SEGMENTATION = 3
+
+# Au-delà de cette fraction d'entrées déclarées « superflues », l'audit a confondu
+# « à supprimer » avec « vérifié » (observé en direct : un audit rendant les 8
+# entrées CORRECTES en superflus, motif « cette entrée est correcte »). On ignore
+# alors TOUS les superflus. Retirer à tort perd un projet — la seule issue
+# inacceptable ; ajouter à tort ne fait qu'un fantôme. La borne protège ce sens.
+SEUIL_SUPERFLUS = 0.5
+
 # Le SDK retombe sur 300 s par opération quand timeout_ms n'est pas passé. Avec
 # 4 workers, UN appel pendu immobiliserait 25 % du débit pendant cinq minutes.
+# Sur le recueil de 129 pages, une fiche dense (5 pages en entrée, une fiche REX
+# complète en sortie) dépasse légitimement 120 s côté medium : d'où 180 s.
 TIMEOUT_UPLOAD_MS = 180_000        # 9,4 Mo à téléverser
 TIMEOUT_OCR_MS = 600_000           # un recueil de 130 pages met légitimement des minutes
-TIMEOUT_SEGMENTATION_MS = 120_000
-TIMEOUT_EXTRACTION_MS = 120_000
+TIMEOUT_SEGMENTATION_MS = 180_000
+TIMEOUT_EXTRACTION_MS = 180_000
 
 # Le défaut du SDK est AUCUN retry : un seul 429 perdait une fiche. Le backoff
 # intégré honore déjà l'en-tête Retry-After — ne pas écrire de boucle maison.
 # Passé par appel et non sur le client : chaque jambe veut un budget différent
 # (réessayer quatre fois un téléversement de 9,4 Mo, c'est 38 Mo montés).
+#
+# INVARIANT : max_elapsed_time DOIT dépasser timeout_ms, sinon un unique délai
+# d'attente épuise tout le budget avant le moindre réessai. Le SDK réessaie bien
+# les httpx.TimeoutException (dont ReadTimeout) quand retry_connection_errors est
+# vrai, mais retry_with_backoff abandonne dès que « écoulé > max_elapsed_time » :
+# avec 120 s == 120 s, le premier ReadTimeout n'était JAMAIS réessayé — c'est ce
+# qui a perdu une fiche sur le recueil de 129 pages. 300 s laisse la place à un
+# réessai après un délai de 180 s (deux tentatives, ~6 min au pire, bornées).
 RETRY_EXTRACTION = RetryConfig(
     "backoff",
     BackoffStrategy(initial_interval=1_000, max_interval=20_000, exponent=1.6,
-                    max_elapsed_time=120_000),
-    True,  # retry_connection_errors : une coupure réseau ne doit pas perdre une fiche
+                    max_elapsed_time=300_000),
+    True,  # retry_connection_errors : une coupure réseau (ou un ReadTimeout) ne doit pas perdre une fiche
 )
 RETRY_SEGMENTATION = RetryConfig(
     "backoff",
     BackoffStrategy(initial_interval=1_000, max_interval=20_000, exponent=1.6,
-                    max_elapsed_time=120_000),
+                    max_elapsed_time=300_000),
     True,
 )
 RETRY_OCR = RetryConfig(
@@ -474,6 +507,102 @@ def _echec(index, titre, debut, fin, categorie, message, reessayable, code=None,
 # --- Segments ----------------------------------------------------------------
 
 
+def _trous_interieurs(liste, nb_pages):
+    """
+    Pages non couvertes SITUÉES ENTRE la première et la dernière page couverte —
+    les seuls vrais candidats à un projet omis, offerts en indice au vérificateur.
+
+    On écarte à dessein les pages non couvertes de TÊTE (avant la première fiche)
+    et de QUEUE (après la dernière) : ce sont l'introduction, le sommaire et la
+    carte en ouverture, les annexes en clôture — que l'énumération exclut à raison.
+    Les offrir en indice poussait le vérificateur à les promouvoir en fiches
+    fantômes (mesuré sur le recueil réel : intro + sommaire + carte rendus en
+    3 fiches). Un trou INTÉRIEUR, lui, est presque toujours une fiche sautée
+    (mesuré : les pages 54-75 récupérées sur le même recueil).
+
+    Indice au critique, JAMAIS une donnée assénée : ce n'est pas le cross-check
+    `set(1..N) − ∪segments == PagesHorsProjet` que CLAUDE.md interdit (il se
+    contredit à grande échelle) — on ne compare rien, on tend des pages à examiner
+    et on laisse le modèle trancher page par page.
+    """
+    couvertes = set()
+    for seg in liste or []:
+        debut, fin = seg.get("PageDebut"), seg.get("PageFin")
+        if isinstance(debut, bool) or isinstance(fin, bool):
+            continue
+        if not isinstance(debut, int) or not isinstance(fin, int):
+            continue
+        if debut > fin:
+            debut, fin = fin, debut
+        couvertes.update(range(max(1, debut), min(nb_pages, fin) + 1))
+    if not couvertes:
+        return []
+    return [p for p in range(min(couvertes), max(couvertes) + 1) if p not in couvertes]
+
+
+def _audit_propre(critique):
+    """Vrai si l'audit ne signale ni omission (`manquants`) ni entrée superflue."""
+    if not critique:
+        return True
+    return not critique.get("manquants") and not critique.get("superflus")
+
+
+def _ajouter_manquants(liste, critique):
+    """
+    Filet no-loss de fin de boucle : ajoute les `manquants` du dernier audit comme
+    nouveaux segments. **N'applique JAMAIS les `superflus`.**
+
+    Retirer mécaniquement une entrée que l'audit dit superflue perd un vrai projet
+    — la seule issue inacceptable. Mesuré sur l'OCR réel de corpus_2 : le
+    vérificateur marquait obstinément une fiche RÉELLE (« Petite Camargue ») comme
+    superflue à chaque tour ; l'appliquer la supprimait. Les superflus n'agissent
+    donc que via la ré-énumération, où le modèle relit les pages et tranche —
+    jamais par une suppression aveugle. Ajouter à tort ne fait qu'un fantôme
+    (que `preparer_segments` ou l'expert écartent), retirer à tort perd tout :
+    le filet ne fait donc qu'ajouter.
+
+    Les `manquants` renvoient à des pages du document ; à n'appeler qu'avec le
+    dernier audit, calculé sur la liste courante.
+    """
+    garde = list(liste or [])
+    if not critique:
+        return garde
+    for m in critique.get("manquants") or []:
+        debut, fin = m.get("page_debut"), m.get("page_fin")
+        if isinstance(debut, bool) or isinstance(fin, bool):
+            continue
+        if not isinstance(debut, int) or not isinstance(fin, int):
+            continue
+        garde.append({
+            "PageDebut": debut,
+            "PageFin": fin,
+            "Titre": m.get("titre") or "Projet",
+            "Motif": m.get("motif") or "ajouté d'après l'audit de vérification",
+        })
+    return garde
+
+
+def _assainir_critique(critique, nb_candidats):
+    """
+    Nettoie un audit AVANT tout usage (raffinement ou filet). Ne garde que des
+    `superflus` d'index valides, et JETTE tous les superflus si leur nombre
+    dépasse `SEUIL_SUPERFLUS × nb_candidats` : au-delà, le modèle a pris
+    `superflus` pour un journal de vérification et y a versé des entrées
+    correctes (observé en direct). Les `manquants` passent tels quels — ajouter à
+    tort ne fait qu'un fantôme, retirer à tort perd un projet. C'est ce garde-fou
+    qui interdit à un audit égaré de vider la liste.
+    """
+    if not critique:
+        return critique
+    superflus = [c for c in (critique.get("superflus") or [])
+                 if isinstance(c.get("index"), int)
+                 and not isinstance(c.get("index"), bool)
+                 and 0 <= c["index"] < nb_candidats]
+    if len(superflus) > SEUIL_SUPERFLUS * nb_candidats:
+        superflus = []
+    return {"manquants": critique.get("manquants") or [], "superflus": superflus}
+
+
 def valider_segment(segment, nb_pages):
     """
     Renvoie (debut, fin) en 1-indexé, ou un message d'erreur (str).
@@ -765,12 +894,18 @@ def _ocr_du_document(client, file_content, filename, *, document_id, cle_ocr,
     return ocr, False, _resolved_model(ocr, MODEL_OCR)
 
 
-def _segmenter(client, charge_ocr, ctx, *, progress_callback=None):
-    """Découpe le recueil en fiches. Renvoie (segments, model, usage)."""
-    _avancer(progress_callback, "segmentation", 0.2, "Découpage du recueil en fiches…")
+def _appel_segmentation(client, contenu, ctx):
+    """
+    UN appel d'énumération : document entier, ou (aux passages de raffinement)
+    document + clé `revision`. Renvoie (segments, model, usage).
+
+    Le prompt système et la clé de cache sont identiques d'un appel à l'autre :
+    les passages de raffinement profitent donc du cache de prompt (préfixe système
+    commun écrit une fois, puis touché ; seul le message `user` varie).
+    """
     requete = construire_requete_chat(
         ctx["prompt_segmentation"],
-        clean_document(charge_ocr),
+        contenu,
         modele=MODEL_SEGMENTATION,
         response_format=ctx["format_segmentation"],
         prompt_cache_key=ctx["cle_cache_segmentation"],
@@ -780,16 +915,141 @@ def _segmenter(client, charge_ocr, ctx, *, progress_callback=None):
         timeout_ms=TIMEOUT_SEGMENTATION_MS,
         retries=RETRY_SEGMENTATION,
     )
-    contenu = reponse.choices[0].message.content
     try:
-        segments = json.loads(contenu).get("Liste", [])
+        segments = json.loads(reponse.choices[0].message.content).get("Liste", [])
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Liste de projets illisible : {exc}") from exc
-    _avancer(progress_callback, "segmentation", 1.0,
-             f"{len(segments)} fiche(s) repérée(s)")
     return (segments,
             _resolved_model(reponse, MODEL_SEGMENTATION),
             usage_depuis_reponse(reponse))
+
+
+def _payload_pages(charge_ocr):
+    """
+    Pages OCR matérialisées une fois en {page_number, content}, réutilisées par
+    tous les appels de la boucle (une seule traversée de la charge OCR).
+    """
+    return [{"page_number": n, "content": c} for n, c in _ocr_pages(charge_ocr)]
+
+
+def _contenu_enumeration(pages, revision=None):
+    """
+    Charge `user` de l'énumération : le document, plus — aux passages de
+    raffinement — la clé `revision` (liste précédente + audit). Reste un objet
+    JSON unique, contrat d'entrée que listPrompt.md décrit.
+    """
+    obj = {"pages": pages}
+    if revision:
+        obj["revision"] = revision
+    return json.dumps(obj, indent=2, ensure_ascii=False)
+
+
+def _contenu_verification(pages, liste, pages_non_couvertes):
+    """
+    Charge `user` de la vérification : le document, la liste candidate INDEXÉE à
+    auditer, et les pages que personne ne couvre (indice, pas une vérité).
+    """
+    liste_a_verifier = [
+        {"index": i, "Titre": s.get("Titre") or f"Projet {i + 1}",
+         "PageDebut": s.get("PageDebut"), "PageFin": s.get("PageFin")}
+        for i, s in enumerate(liste)
+    ]
+    obj = {"pages": pages, "liste_a_verifier": liste_a_verifier,
+           "pages_non_couvertes": pages_non_couvertes}
+    return json.dumps(obj, indent=2, ensure_ascii=False)
+
+
+def _appel_verification(client, contenu, ctx):
+    """
+    UN appel de vérification (audit) d'une liste candidate. Renvoie
+    ({"manquants": [...], "superflus": [...]}, model, usage).
+
+    Prompt système et clé de cache distincts de l'énumération (préfixe
+    « verification » ≠ « segmentation »), donc aucune collision de cache.
+    """
+    requete = construire_requete_chat(
+        ctx["prompt_verification"],
+        contenu,
+        modele=MODEL_SEGMENTATION,
+        response_format=ctx["format_verification"],
+        prompt_cache_key=ctx["cle_cache_verification"],
+    )
+    reponse = client.chat.complete(
+        **requete,
+        timeout_ms=TIMEOUT_SEGMENTATION_MS,
+        retries=RETRY_SEGMENTATION,
+    )
+    try:
+        audit = json.loads(reponse.choices[0].message.content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Audit de vérification illisible : {exc}") from exc
+    return (
+        {"manquants": audit.get("manquants") or [],
+         "superflus": audit.get("superflus") or []},
+        _resolved_model(reponse, MODEL_SEGMENTATION),
+        usage_depuis_reponse(reponse),
+    )
+
+
+def _segmenter(client, charge_ocr, ctx, *, progress_callback=None):
+    """
+    Découpe le recueil en fiches. Renvoie (segments, model, usage).
+
+    Stratégie (Task 7) : énumérer les projets sur le DOCUMENT ENTIER, puis une
+    boucle vérifier→raffiner (≤ MAX_ITER_SEGMENTATION) qui corrige omissions et
+    entrées superflues. Le fenêtrage est abandonné : découper l'espace ne rattrape
+    pas une fiche oubliée DANS une fenêtre (mesuré) ; l'auto-critique, si. Les
+    bornes restées approximatives ici seront affinées par la localisation par REX
+    (étape D). Le seam — signature et (segments, model, usage) — ne bouge pas,
+    donc traiter_document / relancer / eval_corpus ignorent la boucle.
+    """
+    pages = _payload_pages(charge_ocr)
+    nb_pages = len(pages)
+    usage_total = usage_vide()
+
+    _avancer(progress_callback, "segmentation", 0.15, "Énumération des fiches…")
+    liste, model, u = _appel_segmentation(client, _contenu_enumeration(pages), ctx)
+    usage_cumuler(usage_total, u)
+
+    critique = None
+    for i in range(MAX_ITER_SEGMENTATION):
+        trous = _trous_interieurs(liste, nb_pages)
+        _avancer(progress_callback, "segmentation",
+                 0.4 + 0.5 * i / MAX_ITER_SEGMENTATION,
+                 f"Vérification du découpage ({len(liste)} fiche(s))…")
+        critique, m, u = _appel_verification(
+            client, _contenu_verification(pages, liste, trous), ctx)
+        usage_cumuler(usage_total, u)
+        model = model or m
+        critique = _assainir_critique(critique, len(liste))
+        if _audit_propre(critique):
+            critique = None          # convergé : rien à forcer en fin de boucle
+            break
+        if i < MAX_ITER_SEGMENTATION - 1:
+            revision = {
+                "liste_precedente": [
+                    {"Titre": s.get("Titre"), "PageDebut": s.get("PageDebut"),
+                     "PageFin": s.get("PageFin")} for s in liste],
+                "manquants": critique.get("manquants") or [],
+                "superflus": critique.get("superflus") or [],
+            }
+            _avancer(progress_callback, "segmentation",
+                     0.4 + 0.5 * (i + 0.5) / MAX_ITER_SEGMENTATION,
+                     "Correction de la liste…")
+            liste, m, u = _appel_segmentation(
+                client, _contenu_enumeration(pages, revision), ctx)
+            usage_cumuler(usage_total, u)
+
+    # Boucle épuisée sans converger : filet no-loss — on FORCE l'ajout des
+    # manquants du dernier audit (JAMAIS la suppression des superflus : la retirer
+    # perdrait un vrai projet — voir _ajouter_manquants). Un superflu résiduel est
+    # laissé tel quel : au pire un fantôme, jamais une perte.
+    if critique:
+        liste = _ajouter_manquants(liste, critique)
+
+    _avancer(progress_callback, "segmentation", 1.0,
+             f"{len(liste)} fiche(s) repérée(s)")
+    return liste, model or MODEL_SEGMENTATION, usage_total
 
 
 def resultat_vide(**kw):

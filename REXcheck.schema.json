@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Audit d'une liste de projets",
+  "description": "Vérifie une liste de projets candidats contre le document : signale les projets réels omis (manquants) et les entrées qui ne sont pas des projets (superflus).",
+  "type": "object",
+  "properties": {
+    "manquants": {
+      "type": "array",
+      "description": "Projets RÉELS du document qui ne figurent PAS dans la liste candidate. Liste vide s'il n'en manque aucun.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page_debut": {
+            "type": "integer",
+            "description": "Première page du projet omis.",
+            "minimum": 1
+          },
+          "page_fin": {
+            "type": "integer",
+            "description": "Dernière page du projet omis.",
+            "minimum": 1
+          },
+          "titre": {
+            "type": "string",
+            "description": "Titre du projet omis, puisé dans ces pages."
+          },
+          "motif": {
+            "type": "string",
+            "description": "En une phrase, ce qui prouve que ces pages décrivent un projet réel absent de la liste : site nommé, maître d'ouvrage, numéro de fiche.",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "page_debut",
+          "page_fin",
+          "titre",
+          "motif"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "superflus": {
+      "type": "array",
+      "description": "Entrées de la liste candidate qui ne sont PAS des projets réels : sommaire, carte de localisation, fiche-type ou légende, doublon d'un projet déjà listé. Liste vide s'il n'y en a aucune.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "Index (0-indexé) de l'entrée fautive dans la liste candidate fournie.",
+            "minimum": 0
+          },
+          "titre": {
+            "type": "string",
+            "description": "Titre de l'entrée fautive, recopié pour lever l'ambiguïté."
+          },
+          "motif": {
+            "type": "string",
+            "description": "En une phrase, pourquoi cette entrée n'est pas un projet réel.",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "index",
+          "titre",
+          "motif"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "manquants",
+    "superflus"
+  ],
+  "additionalProperties": false
+}
