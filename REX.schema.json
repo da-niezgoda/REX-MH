@@ -464,12 +464,11 @@
             },
             "publication_recueil": {
               "type": "string",
-              "description": "Année de publication du recueil d'opérations ou du document source d'où est tirée la fiche projet. Format AAAA.",
-              "pattern": "^[0-9]{4}$",
+              "description": "Année de publication du recueil d'opérations ou du document source d'où est tirée la fiche projet, au format AAAA — UNIQUEMENT si cette date de publication figure explicitement dans les pages fournies. Ne pas la déduire d'une année citée dans le récit (travaux, arrêté, événement) : à défaut de date de publication explicite, laisser vide.",
+              "pattern": "^([0-9]{4})?$",
               "examples": [
-                "2006",
-                "2010",
-                "2013"
+                "",
+                "2006"
               ]
             }
           },

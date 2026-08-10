@@ -241,6 +241,22 @@ def test_dates_intactes_en_tache_3(index, schema_rex):
     assert conformite.compter_recalages(rapport) == 0, rapport["corrections"]
 
 
+def test_publication_recueil_peut_etre_vide(index, schema_rex):
+    """
+    Ancrage de la correction : le modèle doit pouvoir LAISSER publication_recueil
+    vide quand aucune date de publication n'est explicite dans les pages — sinon il
+    la devine (mesuré : 8/29 fiches divergentes, 2001→2013, sur un document unique).
+    Le motif `^[0-9]{4}$`, requis et strict, l'INTERDISAIT et forçait une valeur.
+    Relâché en `^([0-9]{4})?$` : vide est désormais conforme, sans recalage.
+    """
+    fiche = fiche_conforme(schema_rex)
+    fiche["Description"]["publication_recueil"] = ""
+    obtenue, rapport = conformite.conformer(fiche, index)
+    assert rapport["statut"] == "conforme", rapport
+    assert obtenue["Description"]["publication_recueil"] == ""
+    assert conformite.compter_recalages(rapport) == 0, rapport["corrections"]
+
+
 # --- Verdicts ----------------------------------------------------------------
 
 
