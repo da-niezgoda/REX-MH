@@ -604,8 +604,17 @@ def _ajouter_manquants(liste, critique):
 
     Les `manquants` renvoient à des pages du document ; à n'appeler qu'avec le
     dernier audit, calculé sur la liste courante.
+
+    **Fusion des fragments** : un manquant de MÊME titre (canonique) et de pages
+    contiguës ou chevauchantes qu'un segment déjà présent est FUSIONNÉ dans celui-ci
+    (bornes étendues) plutôt qu'ajouté — sinon une borne de début qui dérive d'une
+    page recrée le projet en double (mesuré : « Etang de Lindre » p62-66 laissait un
+    fantôme p61-61 d'une page, d'où 30 fiches au lieu de 29). Le titre identique est
+    le discriminant sûr : deux fiches distinctes ne sont jamais à la fois contiguës
+    ET de même titre, donc la fusion n'avale aucun vrai projet voisin — la propriété
+    no-loss tient (on n'a fait qu'étendre une borne, jamais retirer un segment).
     """
-    garde = list(liste or [])
+    garde = [dict(s) for s in (liste or [])]
     if not critique:
         return garde
     for m in critique.get("manquants") or []:
@@ -614,10 +623,25 @@ def _ajouter_manquants(liste, critique):
             continue
         if not isinstance(debut, int) or not isinstance(fin, int):
             continue
+        titre = m.get("titre") or "Projet"
+        cle = conformite.canoniser(titre)
+        fusionne = False
+        if cle:
+            for s in garde:
+                sd, sf = s.get("PageDebut"), s.get("PageFin")
+                if (isinstance(sd, int) and not isinstance(sd, bool)
+                        and isinstance(sf, int) and not isinstance(sf, bool)
+                        and conformite.canoniser(s.get("Titre")) == cle
+                        and debut <= sf + 1 and sd <= fin + 1):
+                    s["PageDebut"], s["PageFin"] = min(sd, debut), max(sf, fin)
+                    fusionne = True
+                    break
+        if fusionne:
+            continue
         garde.append({
             "PageDebut": debut,
             "PageFin": fin,
-            "Titre": m.get("titre") or "Projet",
+            "Titre": titre,
             "Motif": m.get("motif") or "ajouté d'après l'audit de vérification",
         })
     return garde

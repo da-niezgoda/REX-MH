@@ -116,6 +116,32 @@ def test_ajouter_manquants_none_est_une_copie():
     assert resultat == liste and resultat is not liste
 
 
+def test_ajouter_manquants_fusionne_un_fragment_du_meme_projet():
+    """
+    Régression 30-vs-29 : une borne de début qui a dérivé d'une page fait
+    re-proposer la page orpheline comme un « manquant » de MÊME titre. On la fusionne
+    dans le segment existant (bornes étendues) au lieu de recréer le projet en double
+    — « Etang de Lindre » p62-66 + fantôme p61-61 -> p61-66. Le titre est comparé
+    après canonicalisation (casse/accents indifférents).
+    """
+    liste = [seg(54, 60, "Breitsandgiessen"), seg(62, 66, "Etang de Lindre")]
+    critique = {"superflus": [], "manquants": [
+        {"page_debut": 61, "page_fin": 61, "titre": "étang de lindre", "motif": "m"}]}
+    resultat = p._ajouter_manquants(liste, critique)
+    assert [s["Titre"] for s in resultat] == ["Breitsandgiessen", "Etang de Lindre"]
+    assert bornes(resultat) == [(54, 60), (61, 66)]
+
+
+def test_ajouter_manquants_ne_fusionne_pas_un_voisin_distinct():
+    """No-loss : un manquant voisin mais de titre DIFFÉRENT est ajouté, jamais avalé."""
+    liste = [seg(1, 5, "Projet A")]
+    critique = {"superflus": [], "manquants": [
+        {"page_debut": 6, "page_fin": 8, "titre": "Projet B distinct", "motif": "m"}]}
+    resultat = p._ajouter_manquants(liste, critique)
+    assert [s["Titre"] for s in resultat] == ["Projet A", "Projet B distinct"]
+    assert bornes(resultat) == [(1, 5), (6, 8)]
+
+
 def crit(manquants=(), superflus=()):
     return {"manquants": list(manquants), "superflus": list(superflus)}
 
