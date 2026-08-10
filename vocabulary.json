@@ -1,8 +1,11 @@
 {
   "commentaire": [
-    "Vocabulaire contrôlé, en dehors du code. Créé en tâche 3 avec la seule",
-    "section « alias » ; la tâche 5 l'étendra (clés d'export type_valorisation,",
-    "règles de format, routage de Contexte.contexte vers Contexte.autres).",
+    "Vocabulaire contrôlé, en dehors du code. Créé en tâche 3 (section « alias »),",
+    "étendu en tâche 5 : « regles » (formats, ex. date → année), « routage »",
+    "(Contexte.contexte → Contexte.autres) et « cles_export » (libellé → clé de",
+    "base). Les clés de type_valorisation sont incomplètes (Médias, Prix ou",
+    "récompense, Site Ramsar manquent) : le garde de complétude laisse donc",
+    "l'export en libellés tant que la table n'est pas complète.",
     "",
     "Les clés sont des CHEMINS de schéma « Section/champ », jamais des noms de",
     "champ nus : deux sections pourraient porter le même nom de feuille.",
@@ -41,7 +44,19 @@
 
   "tiers_desactives": {},
 
-  "regles": {},
+  "regles": {
+    "Enjeux/date_debut": { "format": "annee" },
+    "Enjeux/date_fin": { "format": "annee" }
+  },
 
-  "routage": {}
+  "routage": {
+    "Contexte/contexte": "Contexte/autres"
+  },
+
+  "cles_export": {
+    "Valorisation/type_valorisation": {
+      "Sentiers pédagogiques": "Sentier",
+      "Document de communications": "Document_comm"
+    }
+  }
 }

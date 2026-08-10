@@ -93,6 +93,37 @@ def test_resume_derive_du_json_au_rechargement(schema_rex, index_conformite):
     assert "Presentation/Région" in plat["_validation_resume"]
 
 
+def test_type_valorisation_en_libelles_si_table_incomplete(schema_rex, index_conformite):
+    """
+    Tâche 5 : la table `cles_export` de type_valorisation est incomplète (Médias,
+    Prix ou récompense, Site Ramsar sans clé). Le garde de complétude laisse donc
+    l'export en LIBELLES — jamais un mélange clés/libellés.
+    """
+    fiche = fiche_conforme(schema_rex)
+    fiche["Valorisation"]["type_valorisation"] = ["Document de communications"]
+    plat = app.flatten_project_data(fiche, index_conformite)
+    assert plat["type_valorisation"] == "Document de communications"
+    assert "Document_comm" not in plat["type_valorisation"]
+
+
+def test_cles_export_appliquees_si_table_complete(schema_rex):
+    """
+    Table COMPLÈTE (les 5 valeurs ont une clé) → l'export émet les clés de base.
+    Prouve que le mécanisme s'« allumera » d'une simple édition de vocabulary.json
+    une fois les clés manquantes fournies, sans changement de code.
+    """
+    enum = schema_rex["properties"]["Valorisation"]["properties"][
+        "type_valorisation"]["items"]["enum"]
+    table = {v: v.upper().replace(" ", "_") for v in enum if v}
+    vocab = {"cles_export": {"Valorisation/type_valorisation": table}}
+    index, problemes = conformite.construire_index(schema_rex, vocab)
+    assert problemes == [], problemes
+    fiche = fiche_conforme(schema_rex)
+    fiche["Valorisation"]["type_valorisation"] = ["Médias", "Site Ramsar"]
+    plat = app.flatten_project_data(fiche, index)
+    assert plat["type_valorisation"] == "MÉDIAS, SITE_RAMSAR"
+
+
 # --- Classeur ----------------------------------------------------------------
 
 

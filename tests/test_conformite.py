@@ -2,7 +2,7 @@
 Normalisation et validation — hors ligne, sans base, sans streamlit.
 
 Deux balayages portent l'essentiel de la valeur : `test_variantes_reviennent` et
-`test_aucun_recalage_croise`. Ensemble ils exercent les 204 valeurs
+`test_aucun_recalage_croise`. Ensemble ils exercent les 186 valeurs
 d'énumération du schéma contre une dizaine de mutations chacune, en quelques
 millisecondes, et c'est ce qui rend défendable l'absence de distance d'édition.
 """
@@ -17,17 +17,12 @@ from fabrique import chemins_enumeres, fiche_conforme, variantes_proches
 
 RACINE = Path(__file__).resolve().parent.parent
 
-# Alias volontairement en attente : « Site Natura 2000 » n'existe pas encore dans
-# Contexte.contexte. La tâche 5 ajoutera la valeur et retirera ces lignes. Toute
-# AUTRE anomalie d'index doit faire échouer la suite — c'est ce que garantit la
-# comparaison à cette liste blanche, plutôt qu'un simple « on tolère les
-# problèmes ».
-EN_ATTENTE_TACHE_5 = {
-    "Contexte/contexte : l'alias « Natura 2000 » vise « Site Natura 2000 », "
-    "qui n'est pas dans l'énumération",
-    "Contexte/contexte : l'alias « Zone Natura 2000 » vise « Site Natura 2000 », "
-    "qui n'est pas dans l'énumération",
-}
+# La tâche 5 a ajouté « Site Natura 2000 » à Contexte.contexte : les deux alias
+# Natura 2000 visent désormais une valeur admise, et l'index ne doit plus signaler
+# AUCUN problème. On garde l'ensemble (vide) comme référence explicite pour que
+# toute anomalie d'index future fasse échouer la suite, plutôt qu'un simple « on
+# tolère les problèmes ».
+PROBLEMES_INDEX_ATTENDUS = set()
 
 
 @pytest.fixture(scope="module")
@@ -83,7 +78,7 @@ def test_index_sans_ambiguite(index):
 
 def test_problemes_d_index_tous_declares(schema_rex, vocabulaire):
     _, problemes = conformite.construire_index(schema_rex, vocabulaire)
-    assert set(problemes) == EN_ATTENTE_TACHE_5, set(problemes) ^ EN_ATTENTE_TACHE_5
+    assert set(problemes) == PROBLEMES_INDEX_ATTENDUS, set(problemes) ^ PROBLEMES_INDEX_ATTENDUS
 
 
 # --- Les deux balayages ------------------------------------------------------
@@ -131,8 +126,9 @@ def test_valeur_hors_vocabulaire_laissee_intacte(index):
                      "Réserve de Chasse et de Pêche"):
         obtenu, regle = conformite.resoudre(inventee, entree)
         assert obtenu == inventee and regle is None, (inventee, obtenu, regle)
-    # « Site classe » n'est que « Site classé » sans accent : lui doit se recaler.
-    assert conformite.resoudre("Site classe", entree)[0] == "Site classé"
+    # « reserve naturelle regionale » n'est que la valeur sans casse ni accents :
+    # elle, doit se recaler.
+    assert conformite.resoudre("reserve naturelle regionale", entree)[0] == "Réserve Naturelle Régionale"
 
 
 def test_alias_de_ponctuation(index):
@@ -219,26 +215,38 @@ def test_enum_et_motifs_restent_sur_une_ligne(index, schema_rex):
     """Une valeur d'énumération ou à motif est un jeton : tout est écrasé."""
     fiche = fiche_conforme(schema_rex)
     fiche["Description"]["publication_recueil"] = "\n 2006 \n"
-    fiche["Contexte"]["contexte"] = "  Site\n classé  "
+    fiche["Contexte"]["contexte"] = "  Parc\n National  "
     obtenue, _ = conformite.conformer(fiche, index)
     assert obtenue["Description"]["publication_recueil"] == "2006"
-    assert obtenue["Contexte"]["contexte"] == "Site classé"
+    assert obtenue["Contexte"]["contexte"] == "Parc National"
 
 
-def test_dates_intactes_en_tache_3(index, schema_rex):
+def test_dates_reduites_a_l_annee(index, schema_rex):
     """
-    Contrat exécutable de la frontière tâche 3 / tâche 5.
+    Tâche 5 : les dates sont réduites à l'année (AAAA). Contrat tâche 3 inversé.
 
-    Réduire « 01/01/1991 » à « 1991 » maintenant rendrait CHAQUE fiche
-    « corrigé » alors que le schéma admet encore JJ/MM/AAAA, ce qui mettrait hors
-    d'atteinte la barre « zéro recalage = propre ». La tâche 5 changera le motif,
-    la description, le prompt et la règle dans le même commit.
+    Le motif du schéma est passé à « année ou vide » et une règle `format: annee`
+    (vocabulary.json) réduit toute date plus riche : « 01/01/1991 » relu d'une
+    archive devient « 1991 » (un recalage `format_annee`, verdict `corrige`). Une
+    extraction fraîche, déjà en AAAA grâce au motif, reste `conforme` sans
+    recalage — la barre « zéro recalage = propre » tient donc toujours.
     """
-    fiche = fiche_conforme(schema_rex)
-    fiche["Enjeux"]["date_debut"] = "01/01/1991"
-    obtenue, rapport = conformite.conformer(fiche, index)
-    assert obtenue["Enjeux"]["date_debut"] == "01/01/1991"
-    assert conformite.compter_recalages(rapport) == 0, rapport["corrections"]
+    archive = fiche_conforme(schema_rex)
+    archive["Enjeux"]["date_debut"] = "01/01/1991"
+    archive["Enjeux"]["date_fin"] = "07/2006"
+    obtenue, rapport = conformite.conformer(archive, index)
+    assert obtenue["Enjeux"]["date_debut"] == "1991"
+    assert obtenue["Enjeux"]["date_fin"] == "2006"
+    assert rapport["statut"] == "corrige", rapport["erreurs"]
+    reductions = [c for c in rapport["corrections"] if c["regle"] == "format_annee"]
+    assert len(reductions) == 2, rapport["corrections"]
+
+    fraiche = fiche_conforme(schema_rex)
+    fraiche["Enjeux"]["date_debut"] = "1991"
+    fraiche["Enjeux"]["date_fin"] = ""
+    _, propre = conformite.conformer(fraiche, index)
+    assert propre["statut"] == "conforme", propre
+    assert conformite.compter_recalages(propre) == 0, propre["corrections"]
 
 
 def test_publication_recueil_peut_etre_vide(index, schema_rex):
@@ -257,6 +265,80 @@ def test_publication_recueil_peut_etre_vide(index, schema_rex):
     assert conformite.compter_recalages(rapport) == 0, rapport["corrections"]
 
 
+# --- Routage Contexte.contexte → Contexte.autres (tâche 5) -------------------
+
+
+def test_valeur_retiree_est_routee_vers_autres(index, schema_rex):
+    """
+    Un statut retiré de l'énumération est *redirigé* vers « autres », pas perdu :
+    « contexte » est vidé, la fiche redevient conforme, un recalage nommé le trace.
+    """
+    fiche = fiche_conforme(schema_rex)
+    fiche["Contexte"]["contexte"] = "Espace Naturel Sensible"
+    fiche["Contexte"]["autres"] = ""
+    obtenue, rapport = conformite.conformer(fiche, index)
+    assert obtenue["Contexte"]["contexte"] == ""
+    assert "Espace Naturel Sensible" in obtenue["Contexte"]["autres"]
+    assert rapport["statut"] == "corrige", rapport["erreurs"]
+    assert any(c["regle"] == "route_vers_autres" for c in rapport["corrections"])
+
+
+def test_routage_preserve_autres_existant(index, schema_rex):
+    """Le contenu déjà présent dans « autres » n'est pas écrasé, mais complété."""
+    fiche = fiche_conforme(schema_rex)
+    fiche["Contexte"]["contexte"] = "Arrêté Préfectoral de Biotope"
+    fiche["Contexte"]["autres"] = "ZNIEFF de type I"
+    obtenue, _ = conformite.conformer(fiche, index)
+    assert obtenue["Contexte"]["contexte"] == ""
+    assert "ZNIEFF de type I" in obtenue["Contexte"]["autres"]
+    assert "Arrêté Préfectoral de Biotope" in obtenue["Contexte"]["autres"]
+
+
+def test_routage_idempotent(index, schema_rex):
+    """Deuxième passe : « contexte » vidé n'est plus routé, la fiche est stable."""
+    fiche = fiche_conforme(schema_rex)
+    fiche["Contexte"]["contexte"] = "Site inscrit"
+    une, _ = conformite.conformer(fiche, index)
+    deux, second = conformite.conformer(une, index)
+    assert second["corrections"] == [], second["corrections"]
+    assert deux == une
+
+
+def test_site_natura_2000_admis_et_ses_alias(index):
+    """Valeur ajoutée en tâche 5 ; les deux alias Natura 2000 y mènent enfin."""
+    entree = index["champs"]["Contexte/contexte"]
+    assert "Site Natura 2000" in entree["exact"]
+    assert conformite.resoudre("Natura 2000", entree) == ("Site Natura 2000", "alias")
+    assert conformite.resoudre("Zone Natura 2000", entree) == ("Site Natura 2000", "alias")
+
+
+def test_reserve_naturelle_non_qualifiee_routee(index, schema_rex):
+    """
+    Le résidu Petite Camargue : « réserve naturelle » sans qualificatif n'est PAS
+    une valeur de l'énumération, donc elle part dans « autres » plutôt que d'être
+    devinée en Nationale ou Régionale. (Le prompt demande au modèle de le faire
+    directement ; ceci n'est que le filet de conformité.)
+    """
+    fiche = fiche_conforme(schema_rex)
+    fiche["Contexte"]["contexte"] = "réserve naturelle"
+    obtenue, _ = conformite.conformer(fiche, index)
+    assert obtenue["Contexte"]["contexte"] == ""
+    assert "réserve naturelle" in obtenue["Contexte"]["autres"]
+
+
+def test_hors_de_france_est_une_region_valide(index, schema_rex):
+    """
+    Tâche 5 : « Hors de France » ajouté à l'énumération Région, pour ne plus
+    forcer une région française sur un projet étranger (le REX suisse sortait en
+    « Emmental (Suisse) », que l'énumération ne pouvait même pas représenter).
+    """
+    fiche = fiche_conforme(schema_rex)
+    fiche["Presentation"]["Région"] = "Hors de France"
+    obtenue, rapport = conformite.conformer(fiche, index)
+    assert rapport["statut"] == "conforme", rapport["erreurs"]
+    assert obtenue["Presentation"]["Région"] == "Hors de France"
+
+
 # --- Verdicts ----------------------------------------------------------------
 
 
@@ -270,7 +352,7 @@ def test_fiche_propre_est_conforme(index, schema_rex):
 def test_precedence_des_verdicts(index, schema_rex):
     """Une erreur résiduelle domine un recalage réussi."""
     fiche = fiche_conforme(schema_rex)
-    fiche["Contexte"]["contexte"] = "site classe"          # recalable
+    fiche["Contexte"]["contexte"] = "reserve naturelle regionale"          # recalable
     fiche["Presentation"]["Région"] = "Terre du Milieu"    # irrécupérable
     _, rapport = conformite.conformer(fiche, index)
     assert rapport["statut"] == "non_conforme"
@@ -302,7 +384,7 @@ def test_empreintes_dans_le_rapport(index, schema_rex):
 
 def test_conformer_ne_mute_pas_son_argument(index, schema_rex):
     fiche = fiche_conforme(schema_rex)
-    fiche["Contexte"]["contexte"] = "site classe"
+    fiche["Contexte"]["contexte"] = "reserve naturelle regionale"
     avant = json.dumps(fiche, sort_keys=True, ensure_ascii=False)
     conformite.conformer(fiche, index)
     assert json.dumps(fiche, sort_keys=True, ensure_ascii=False) == avant
@@ -310,7 +392,7 @@ def test_conformer_ne_mute_pas_son_argument(index, schema_rex):
 
 def test_normalisation_idempotente(index, schema_rex):
     fiche = fiche_conforme(schema_rex)
-    fiche["Contexte"]["contexte"] = "  SITE CLASSE  "
+    fiche["Contexte"]["contexte"] = "  RESERVE NATURELLE REGIONALE  "
     fiche["Enjeux"]["enjeux"] = [fiche["Enjeux"]["enjeux"][0], ""]
     une, premier = conformite.conformer(fiche, index)
     deux, second = conformite.conformer(une, index)
@@ -325,7 +407,7 @@ def test_journal_est_reversible(index, schema_rex):
     reconstituable — c'est ce qui autorise à ne stocker que la version normalisée.
     """
     fiche = fiche_conforme(schema_rex)
-    fiche["Contexte"]["contexte"] = "site classe"
+    fiche["Contexte"]["contexte"] = "reserve naturelle regionale"
     fiche["Description"]["publication_recueil"] = " 2006 "
     obtenue, rapport = conformite.conformer(fiche, index)
     rejouee = json.loads(json.dumps(obtenue, ensure_ascii=False))
@@ -361,7 +443,7 @@ def test_section_absente_est_signalee_pas_inventee(index, schema_rex):
 def test_resume_lisible(index, schema_rex):
     fiche = fiche_conforme(schema_rex)
     fiche["Presentation"]["Région"] = "Terre du Milieu"
-    fiche["Contexte"]["contexte"] = "site classe"
+    fiche["Contexte"]["contexte"] = "reserve naturelle regionale"
     _, rapport = conformite.conformer(fiche, index)
     resume = conformite.resumer(rapport)
     assert "Presentation/Région" in resume and "recalages" in resume

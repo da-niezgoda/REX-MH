@@ -103,10 +103,10 @@ Points de conception notables :
 | `app.py` | Couche Streamlit : chargement des schémas/prompts, écrans (`st.navigation` : Traitement / Historique / Maintenance), rendu du tableau et du détail, export Excel. L'orchestration OCR → découpage → extraction vit dans `pipeline.py` ; `app.py` n'en garde que de fines enveloppes qui fabriquent le client et le contexte de session. |
 | `REXPrompt.md` | Prompt système d'**extraction** d'une fiche projet (rôle, format d'entrée page par page, gestion des champs absents → `""`). |
 | `listPrompt.md` | Prompt système de **segmentation** du recueil (identifier l'introduction/annexes, détecter les ruptures, définir `PageDebut`/`PageFin`). |
-| `REX.schema.json` | Modèle de données d'une fiche projet : 10 sections (`Presentation`, `Typologie`, `Enjeux`, `Directives`, `Travaux`, `Contexte`, `Objectif`, `Description`, `Valorisation`, `Documents`) avec descriptions détaillées et **énumérations métier** (23 régions, 11 types d'ingénierie écologique, 43 types de milieux Ramsar, 13 typologies SDAGE, 11 typologies hydrogéomorphologiques Sandre, 53 techniques de génie écologique, 15 enjeux, 17 statuts de protection…). |
+| `REX.schema.json` | Modèle de données d'une fiche projet : 10 sections (`Presentation`, `Typologie`, `Enjeux`, `Directives`, `Travaux`, `Contexte`, `Objectif`, `Description`, `Valorisation`, `Documents`) avec descriptions détaillées et **énumérations métier** (24 régions, 11 types d'ingénierie écologique, 43 types de milieux Ramsar, 13 typologies SDAGE, 11 typologies hydrogéomorphologiques Sandre, 53 techniques de génie écologique, 15 enjeux, 7 statuts de protection…). |
 | `REXlist.schema.json` | Modèle de la liste de segments (`PagesHorsProjet[]`, puis `Liste[] : PageDebut, PageFin, Titre, Motif`). L'ordre des propriétés est **l'ordre de génération** en mode strict : les pages hors projet d'abord, et la justification après les bornes de pages — voir *Limites connues*. |
 | `conformite.py` | Normalisation et validation d'une fiche après génération : recalage des valeurs d'énumération approchantes, dédoublonnage des listes, verdict `conforme` / `corrigé` / `non conforme`. N'importe pas `streamlit`. |
-| `vocabulary.json` | Vocabulaire contrôlé hors du code : alias de synonymes, réglages de normalisation. Étendu par la tâche 5 (clés d'export, formats, routage). |
+| `vocabulary.json` | Vocabulaire contrôlé hors du code : alias de synonymes, formats (`regles`, ex. date → année), routage (`Contexte.contexte` → `autres`) et clés d'export vers la base (`cles_export`, remplissage partiel). |
 | `.streamlit/config.toml` | Thème natif « Material 3 » eau & biodiversité (palette, rayons, couleurs de tableau, clair + sombre). Remplace l'ancien `styles.css` injecté : atteint tous les widgets natifs sans iframe, une seule source de vérité pour l'apparence. |
 | `pipeline.py` | Cœur du traitement : client Mistral, construction des requêtes, concurrence, mode par lot, classification des erreurs, comptabilité des jetons, **et l'orchestration** (OCR → découpage → extraction → conformité → persistance, `ctx` passé en argument). **N'importe pas `streamlit`** (voir *Limites connues*). |
 | `store.py` | Persistance SQLite : cache OCR, historique des traitements, fiches, travaux par lot, export/import d'archive. N'importe pas `streamlit` non plus. |
@@ -270,16 +270,20 @@ Développement mené par une seule personne (`da-niezgoda` / `d.niezgoda`), 24 c
   reste `status='ok'`, sinon elle disparaîtrait précisément de l'écran où un expert doit la corriger.
 - **La normalisation ne recale que sur une correspondance exacte après canonicalisation**, plus une
   table d'alias tenue à la main. Jamais de distance d'édition : la clé canonique est vérifiée
-  *injective* sur les 204 valeurs d'énumération à chaque exécution des tests, si bien qu'un recalage
+  *injective* sur les 186 valeurs d'énumération à chaque exécution des tests, si bien qu'un recalage
   est une preuve que la sortie du modèle et la valeur métier ne diffèrent que par la casse, les
   accents, les apostrophes, la ponctuation ou un pluriel. Une valeur non résolue est **laissée telle
   quelle** et signalée — la couche ne devine pas. `type_genie_ecologique` contient `Fauche`,
   `Fenaison et pâture` et `Pâturage` : une distance d'édition y corromprait des données expertes sans
   qu'on puisse dire lesquelles.
-- ⚠️ Deux alias visent `Site Natura 2000`, valeur qui **n'existe pas encore** dans l'énumération
-  `Contexte.contexte`. Ce n'est pas une erreur fatale : le point est signalé dans le popover
-  Maintenance, et la tâche 5 ajoutera la valeur. Un alias mal orthographié, en revanche, fait échouer
-  la suite de tests.
+- **`Contexte.contexte` est restreint aux statuts réellement présents dans la base** (Parc National,
+  Parc Naturel Régional, Réserves Biologiques Domaniale/Forestière, Réserves Naturelles
+  Nationale/Régionale, `Site Natura 2000`). Les statuts retirés (Espace Naturel Sensible, Arrêté
+  Préfectoral de Biotope, Site inscrit/classé…) ne sont pas perdus : `conformite.py` les **redirige**
+  vers le champ libre `Contexte.autres` (règle `routage` du `vocabulary.json`), et le prompt demande
+  au modèle d'y mettre aussi une « réserve naturelle » sans qualificatif Nationale/Régionale. Les deux
+  alias `Site Natura 2000` visent désormais une valeur admise ; un alias mal orthographié, lui, fait
+  toujours échouer la suite de tests.
 - `pipeline.py`, `store.py` et `conformite.py` n'importent délibérément pas `streamlit`. Ce n'est pas une préférence
   de style : un thread de travail sans `ScriptRunContext` qui lit `st.session_state` ne reçoit pas
   d'erreur claire — Streamlit lui sert un état factice **global au processus**, si bien que toutes

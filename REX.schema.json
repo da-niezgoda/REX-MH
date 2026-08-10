@@ -78,7 +78,8 @@
 						"SAINT BARTHELEMY",
 						"SAINT MARTIN",
 						"SAINT PIERRE ET MIQUELON",
-						"WALLIS ET FUTUNA"
+						"WALLIS ET FUTUNA",
+						"Hors de France"
 			    ],
 			    "examples": [
 						"GRAND EST",
@@ -290,15 +291,15 @@
           "properties": {
             "date_debut": {
               "type": "string",
-              "pattern": "^(\\d{2}/\\d{2}/\\d{4}|\\d{2}/\\d{4}|)$",
-              "description": "Date de début des travaux ou de la mise en œuvre effective du projet. Format JJ/MM/AAAA ou MM/AAAA. Si la date n'est pas spécifiée, laisser vide.",
-              "examples": ["01/10/2004", "01/01/2006", "07/2006", ""]
+              "pattern": "^(\\d{4})?$",
+              "description": "Année de début des travaux ou de la mise en œuvre effective du projet, au format AAAA (année seule). Si la date n'est pas spécifiée, laisser vide.",
+              "examples": ["2004", "2006", ""]
             },
             "date_fin": {
               "type": "string",
-              "pattern": "^(\\d{2}/\\d{2}/\\d{4}|\\d{2}/\\d{4}|)$",
-              "description": "Date de fin des travaux ou de la phase principale de mise en œuvre. Format JJ/MM/AAAA ou MM/AAAA. Si le projet est en cours ou la date non spécifiée, laisser vide.",
-              "examples": ["01/06/2006", "01/01/2008", "07/2006", ""]
+              "pattern": "^(\\d{4})?$",
+              "description": "Année de fin des travaux ou de la phase principale de mise en œuvre, au format AAAA (année seule). Si le projet est en cours ou la date non spécifiée, laisser vide.",
+              "examples": ["2006", "2008", ""]
             },
             "enjeux": {
               "type": "array",
@@ -398,7 +399,7 @@
           "properties": {
             "contexte": {
               "type": "string",
-              "description": "Sélectionner le statut de protection juridique le plus strict ou le plus pertinent s'appliquant au site du projet. Choisir dans la liste. Si plusieurs s'appliquent, privilégier le plus contraignant (ex: Réserve Naturelle > Espace Naturel Sensible).",
+              "description": "Statut de protection juridique du site, à choisir STRICTEMENT dans la liste. Si le site relève d'un statut absent de cette liste, ou d'une « réserve naturelle » sans qualificatif Nationale ou Régionale, laisser vide et le préciser dans « autres ».",
               "enum": [
                 "Parc National",
                 "Parc Naturel Régional",
@@ -406,16 +407,7 @@
                 "Réserve Biologique Forestière",
                 "Réserve Naturelle Nationale",
                 "Réserve Naturelle Régionale",
-                "Réserve Naturelle de Corse",
-                "Réserve Nationale de Chasse et de Faune Sauvage",
-                "Réserve de Chasse (ACCA)",
-                "Réserve de Pêche",
-                "Arrêté Préfectoral de Biotope",
-                "Espace Naturel Sensible",
-                "Site du CELRL",
-                "Forêts de Protection",
-                "Site inscrit",
-                "Site classé",
+                "Site Natura 2000",
                 ""
               ],
               "examples": ["", "Réserve Naturelle Régionale"]

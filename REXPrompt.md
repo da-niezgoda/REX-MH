@@ -38,7 +38,7 @@ Le document vous est fournis page par page, avec le numéro de page associé pou
 
  * **Questions Directives (DCE, masse d'eau, Natura 2000)** : répondre "Oui" ou "Non" UNIQUEMENT d'après ce que le document indique explicitement. À défaut d'indication, répondre "N/A" (ou laisser vide) — ne pas répondre "Oui" par défaut au motif que le site est une zone humide ou un cours d'eau.
 
- * **Statut de protection ("contexte")** : ne sélectionner un statut QUE s'il est explicitement nommé dans le document pour ce site. Ne pas déduire un statut d'un simple nom de site, ni le sur-préciser (ex. : ne pas choisir "Réserve Naturelle Régionale" quand le texte dit seulement "réserve naturelle", et ne pas inférer une réserve absente du texte). Si aucun statut n'est mentionné, laisser vide.
+ * **Statut de protection ("contexte")** : ne sélectionner un statut QUE s'il est explicitement nommé dans le document pour ce site, et UNIQUEMENT parmi les valeurs de l'énumération. Ne pas déduire un statut d'un nom de site, d'un gestionnaire ou d'un financeur. Deux règles de repli vers "autres" : (1) si le texte dit seulement « réserve naturelle » sans préciser *Nationale* ni *Régionale*, ne pas trancher — laisser "contexte" vide et écrire « réserve naturelle » dans "autres" ; (2) tout statut réel mais absent de la liste (Espace Naturel Sensible, Arrêté Préfectoral de Biotope, Site inscrit, Site classé, Site du CELRL…) doit aller dans "autres", "contexte" restant vide. Si aucun statut n'est mentionné, laisser vide.
 
  * **"Nom de l'organisme"** : indiquer le maître d'OUVRAGE (celui sous la « maîtrise d'ouvrage » de qui l'opération est menée) ou le porteur principal — et NON le maître d'ŒUVRE (« maîtrise d'œuvre »), ni le gestionnaire actuel du site, lorsqu'ils diffèrent du maître d'ouvrage.
 
@@ -47,6 +47,10 @@ Le document vous est fournis page par page, avec le numéro de page associé pou
  * **Valorisation ("type_valorisation")** : ne lister que les types de valorisation ou de communication explicitement décrits dans le document. Si aucune n'est mentionnée, laisser le tableau vide.
 
  * **"publication_recueil"** : n'indiquer l'année QUE si une date de publication du recueil (ou du document source) figure explicitement dans les pages fournies. Ne PAS la déduire d'une année citée dans le récit (arrêté, travaux, événement, classement…). À défaut, laisser vide.
+
+ * **Dates ("date_debut", "date_fin")** : indiquer UNIQUEMENT l'année, au format AAAA (quatre chiffres). Ne pas fabriquer de jour ni de mois : si le document ne précise qu'une année, s'y limiter ; si aucune date n'est indiquée, laisser vide.
+
+ * **Projets hors de France ("Région", "Bassin")** : si le projet est situé hors de France, indiquer « Hors de France » pour "Région" ET pour "Bassin". Ne PAS deviner une région administrative ni un bassin hydrographique français. Conserver la localisation réelle (pays, commune, lieu-dit) dans "Localisation" et "Adresse précise".
 
  * Utilisez le champ "page_number" pour obtenir les informations associées.
 

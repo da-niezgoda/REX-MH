@@ -697,7 +697,7 @@ def verifier_unicite_des_feuilles(schema):
     return collisions
 
 
-def flatten_project_data(project):
+def flatten_project_data(project, index_conformite=None):
     """
     Aplatit une fiche en un dict à un seul niveau pour l'export Excel.
 
@@ -709,12 +709,16 @@ def flatten_project_data(project):
     Limite connue et verrouillée : les clés sont aplaties à leur nom feuille, sans
     préfixe de section. Voir `verifier_unicite_des_feuilles`.
     """
+    champs = (index_conformite or {}).get("champs") or {}
     flat_data = {}
     for section in SECTIONS:
         contenu = project.get(section)
         if not isinstance(contenu, dict):
             continue
         for key, value in contenu.items():
+            entree = champs.get(f"{section}/{key}")
+            if entree is not None:
+                value = conformite.appliquer_cles_export(entree, value)
             flat_data[key] = (
                 ", ".join(str(v) for v in value) if isinstance(value, list) else value
             )
@@ -731,9 +735,10 @@ def flatten_project_data(project):
     return flat_data
 
 
-def create_excel_download(projects):
+def create_excel_download(projects, index_conformite=None):
     """Classeur Excel des fiches, en octets."""
-    df = pd.DataFrame([flatten_project_data(project) for project in projects])
+    df = pd.DataFrame(
+        [flatten_project_data(project, index_conformite) for project in projects])
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='REX')
@@ -802,7 +807,9 @@ def display_results_table():
         # primaire, pleine largeur de sa colonne, agrandi via styles.css.
         st.download_button(
             label="📥 Télécharger l'export Excel",
-            data=functools.partial(create_excel_download, projects),
+            data=functools.partial(
+                create_excel_download, projects,
+                _contexte_extraction()["index_conformite"]),
             file_name=_nom_export(data['filename']),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             help="Télécharger les données extraites au format Excel",

@@ -85,11 +85,12 @@ def fiche_conforme(schema, *, taille_tableau=1, **surcharges):
 
 
 # Valeur volontairement approximative que le faux modèle renvoie : casse et
-# accent perdus. La couche de conformité doit la ramener à « Site classé », donc
-# le run d'intégration sort en « corrigé » — ce qui exerce la chaîne complète
-# jusqu'à la base, plutôt qu'un chemin où rien n'a jamais besoin d'être recalé.
-CONTEXTE_APPROXIMATIF = "site classe"
-CONTEXTE_ATTENDU = "Site classé"
+# accent perdus. La couche de conformité doit la ramener à « Réserve Naturelle
+# Régionale » (valeur conservée par la tâche 5), donc le run d'intégration sort en
+# « corrigé » — ce qui exerce la chaîne complète jusqu'à la base, plutôt qu'un
+# chemin où rien n'a jamais besoin d'être recalé.
+CONTEXTE_APPROXIMATIF = "reserve naturelle regionale"
+CONTEXTE_ATTENDU = "Réserve Naturelle Régionale"
 
 
 def fiche_de_test(schema):
@@ -101,9 +102,9 @@ def fiche_de_test(schema):
     fiche = fiche_conforme(schema, taille_tableau=2)
     fiche["Presentation"]["Titre"] = "Restauration <tourbière> & marais"
     fiche["Presentation"]["Nom de l'organisme"] = "OiEau"
-    # Format du schéma ACTUEL (JJ/MM/AAAA) : la tâche 5 le réduira à AAAA.
-    fiche["Enjeux"]["date_debut"] = "01/03/2019"
-    fiche["Enjeux"]["date_fin"] = "30/09/2021"
+    # Format AAAA (année seule) depuis la tâche 5 ; le motif du schéma le contraint.
+    fiche["Enjeux"]["date_debut"] = "2019"
+    fiche["Enjeux"]["date_fin"] = "2021"
     fiche["Valorisation"]["url"] = "https://example.org/rex"
     fiche["Contexte"]["contexte"] = CONTEXTE_APPROXIMATIF
     return fiche
@@ -113,7 +114,7 @@ def variantes_proches(valeur):
     """
     Mutations MÉCANIQUES d'une valeur d'énumération, toutes censées se recaler sur
     elle. C'est la pièce maîtresse des tests de conformité : appliquée aux
-    204 valeurs du schéma, elle donne deux balayages complémentaires —
+    186 valeurs du schéma, elle donne deux balayages complémentaires —
 
       · rappel    : chaque mutation revient bien à SA valeur ;
       · précision : aucune mutation de A ne se résout en B ≠ A.

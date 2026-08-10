@@ -98,7 +98,7 @@ def _verifier_conformite(data, rex_schema):
 def _champs_client(data):
     print("\n      -- champs signalés par le client --")
     enjeux = data.get("Enjeux", {})
-    print(f"      date_debut = {enjeux.get('date_debut')!r}   (attendu : AAAA — tâche 5)")
+    print(f"      date_debut = {enjeux.get('date_debut')!r}   (attendu : AAAA)")
     print(f"      date_fin   = {enjeux.get('date_fin')!r}")
     print(f"      ramsar     = {data.get('Typologie', {}).get('type_milieu_ramsar')!r}")
     print(f"      valorisat. = {data.get('Valorisation', {}).get('type_valorisation')!r}")

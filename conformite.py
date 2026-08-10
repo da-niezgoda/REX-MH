@@ -52,6 +52,10 @@ _INVISIBLES = "­﻿"
 
 _CODE_LIBELLE = re.compile(r"^([0-9A-Za-z()]{1,6}) - (.+)$")
 
+# Dernier groupe de 4 chiffres d'une chaîne : l'année d'une date « JJ/MM/AAAA »,
+# « MM/AAAA » ou déjà « AAAA ». Sert à la règle de format `annee` (tâche 5).
+_MOTIF_ANNEE = re.compile(r"(\d{4})\s*$")
+
 # Ordre des tentatives. Le premier tier qui répond gagne, et son nom est
 # journalisé : c'est ce qui rend chaque recalage attribuable.
 TIERS = ("espaces", "canonique", "alias", "code", "libelle", "pluriel",
@@ -130,6 +134,22 @@ def depluraliser(cle_canonique):
                     for m in cle_canonique.split())
 
 
+def _reduire_annee(valeur):
+    """
+    Année (AAAA) extraite d'une date « JJ/MM/AAAA », « MM/AAAA » ou déjà « AAAA ».
+
+    Renvoie la valeur inchangée si aucun groupe de 4 chiffres ne s'y trouve — donc
+    « » reste « ». Pilotée par `regles` dans vocabulary.json, PAS par le nom du
+    champ : c'est la première règle de format, ajoutée en tâche 5 pour réduire les
+    dates que le modèle émettait en « 01/01/AAAA » (jour et mois fabriqués, faute
+    de pouvoir laisser vide un motif requis JJ/MM/AAAA). Le nouveau motif du schéma
+    `^(\\d{4})?$` fait que le modèle émet désormais directement l'année ; cette
+    réduction ne mord donc que sur une archive relue à l'ancien format.
+    """
+    correspondance = _MOTIF_ANNEE.search(valeur)
+    return correspondance.group(1) if correspondance else valeur
+
+
 # --- Index dérivé du schéma --------------------------------------------------
 
 
@@ -149,14 +169,16 @@ def construire_index(schema, vocabulaire=None):
     """
     Index de résolution, plus la liste des problèmes rencontrés en le bâtissant.
 
-    Les problèmes (un alias qui vise une valeur inexistante, par exemple) sont
-    RENVOYÉS et non levés : `Contexte/contexte` n'a pas encore de « Site
-    Natura 2000 », c'est un manque connu que la tâche 5 comblera, et il ne doit
-    pas empêcher l'application de démarrer.
+    Les problèmes (un alias qui vise une valeur inexistante, une cible de routage
+    inconnue, une clé d'export hors énumération) sont RENVOYÉS et non levés : ils
+    ne doivent pas empêcher l'application de démarrer, et le popover Maintenance
+    les affiche. La tâche 5 a comblé le manque historique (« Site Natura 2000 »
+    absent de Contexte/contexte) ; l'ensemble attendu est donc désormais vide.
     """
     vocabulaire = vocabulaire or {}
     alias_vocab = vocabulaire.get("alias") or {}
     tiers_off = vocabulaire.get("tiers_desactives") or {}
+    regles = vocabulaire.get("regles") or {}
     problemes = []
 
     champs = {}
@@ -168,6 +190,7 @@ def construire_index(schema, vocabulaire=None):
             "motif": noeud.get("pattern"),
             "enum": enum,
             "tiers_desactives": set(tiers_off.get(chemin) or ()),
+            "format": (regles.get(chemin) or {}).get("format"),
         }
         if enum:
             entree["exact"] = set(enum)
@@ -205,9 +228,39 @@ def construire_index(schema, vocabulaire=None):
         elif not champs[chemin].get("enum"):
             problemes.append(f"alias déclarés pour « {chemin} », qui n'est pas une énumération")
 
+    # Routage : une valeur d'énumération retirée est redirigée vers un champ libre
+    # plutôt que perdue (tâche 5 : Contexte/contexte → Contexte/autres). La source
+    # doit être une énumération, la cible un champ existant.
+    routage = {}
+    for source, cible in (vocabulaire.get("routage") or {}).items():
+        if source not in champs or not champs[source].get("enum"):
+            problemes.append(f"routage : « {source} » n'est pas une énumération du schéma")
+        elif cible not in champs:
+            problemes.append(f"routage : la cible « {cible} » est inconnue du schéma")
+        else:
+            routage[source] = cible
+
+    # Clés d'export (libellé → clé de base), pour l'EXPORT seulement, jamais le
+    # stockage. Attachées à l'entrée UNIQUEMENT si la table est COMPLÈTE — toutes
+    # les valeurs non vides ont une clé. Ce garde interdit un export à moitié
+    # traduit tant que le client n'a pas fourni les clés manquantes (tâche 5).
+    for chemin, table in (vocabulaire.get("cles_export") or {}).items():
+        entree = champs.get(chemin)
+        if entree is None or not entree.get("enum"):
+            problemes.append(f"clés d'export pour « {chemin} », qui n'est pas une énumération")
+            continue
+        inconnues = [k for k in table if k not in entree["exact"]]
+        if inconnues:
+            problemes.append(
+                f"clés d'export pour « {chemin} » : valeur(s) hors énumération : {inconnues}")
+            continue
+        if all(v in table for v in entree["enum"] if v):
+            entree["cles_export"] = dict(table)
+
     index = {
         "validateur": jsonschema.Draft7Validator(schema),
         "champs": champs,
+        "routage": routage,
         "schema_sha256": empreinte(json.dumps(schema, sort_keys=True, ensure_ascii=False)),
         "vocabulaire_sha256": empreinte(
             json.dumps(vocabulaire, sort_keys=True, ensure_ascii=False)),
@@ -283,6 +336,11 @@ def resoudre(valeur, entree):
     ligne_unique = bool(enum) or bool(entree.get("motif"))
     propre = nettoyer_espaces(valeur, ligne_unique=ligne_unique)
     if enum is None:
+        # Champ à règle de format (ex. date → année) : appliquée sur la valeur
+        # déjà nettoyée de ses espaces, en un seul recalage nommé.
+        if entree.get("format") == "annee":
+            reduit = _reduire_annee(propre)
+            return (reduit, "format_annee") if reduit != valeur else (valeur, None)
         # Champ libre ou à motif : les espaces, et rien de plus.
         return (propre, "espaces") if propre != valeur else (valeur, None)
 
@@ -336,6 +394,61 @@ def _resoudre_liste(valeurs, entree):
     return retenues, corrections
 
 
+def appliquer_cles_export(entree, valeur):
+    """
+    Valeur(s) remplacée(s) par leur clé de base, si le champ a une table de clés
+    COMPLÈTE ; sinon rendue(s) telle(s) quelle(s).
+
+    Le garde de complétude (posé dans `construire_index`) interdit un export à
+    moitié traduit : tant que toutes les valeurs d'énumération n'ont pas de clé,
+    `entree["cles_export"]` reste absent et l'export garde les libellés. Appelée
+    par la couche d'export d'`app.py`, jamais au stockage. Tâche 5 : mécanisme
+    livré, clés manquantes différées (une simple édition de `vocabulary.json`).
+    """
+    table = (entree or {}).get("cles_export")
+    if not table:
+        return valeur
+    if isinstance(valeur, list):
+        return [table.get(v, v) if isinstance(v, str) else v for v in valeur]
+    if isinstance(valeur, str):
+        return table.get(valeur, valeur)
+    return valeur
+
+
+def _router_valeurs(fiche, index):
+    """
+    Déplace vers un champ libre toute valeur d'énumération non admise pour
+    laquelle un routage est déclaré (tâche 5 : `Contexte/contexte` → `.../autres`).
+
+    N'intervient JAMAIS sur une extraction fraîche — le mode strict n'émet que des
+    valeurs admises ou vides. C'est le filet pour une archive relue sous un schéma
+    dont l'énumération a rétréci : le statut retiré est *redirigé*, pas perdu, et
+    la fiche redevient conforme. Journalise `avant`/`apres` sur les DEUX champs,
+    donc reste réversible ; et idempotent, une source vidée n'étant plus routée.
+    """
+    corrections = []
+    for source, cible in index.get("routage", {}).items():
+        sec_s, ch_s = source.split("/", 1)
+        contenu_s = fiche.get(sec_s)
+        if not isinstance(contenu_s, dict) or not isinstance(contenu_s.get(ch_s), str):
+            continue
+        brute = contenu_s[ch_s]
+        propre = nettoyer_espaces(brute, ligne_unique=True)
+        if not propre or propre in index["champs"][source]["exact"]:
+            continue
+        sec_c, ch_c = cible.split("/", 1)
+        contenu_c = fiche.setdefault(sec_c, {})
+        existant = contenu_c.get(ch_c)
+        fusion = f"{existant} ; {propre}" if (existant or "").strip() else propre
+        corrections.append({"chemin": cible, "avant": existant,
+                            "apres": fusion, "regle": "route_vers_autres"})
+        contenu_c[ch_c] = fusion
+        corrections.append({"chemin": source, "avant": brute,
+                            "apres": "", "regle": "route_vers_autres"})
+        contenu_s[ch_s] = ""
+    return corrections
+
+
 # --- Passe complète ----------------------------------------------------------
 
 
@@ -373,6 +486,8 @@ def conformer(fiche, index):
             contenu[champ] = nouvelle
             corrections.append({"chemin": chemin, "avant": valeur,
                                 "apres": nouvelle, "regle": regle})
+
+    corrections += _router_valeurs(fiche, index)
 
     erreurs = [_erreur(e) for e in sorted(
         index["validateur"].iter_errors(fiche), key=lambda e: list(e.path))]
