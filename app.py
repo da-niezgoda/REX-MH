@@ -327,7 +327,11 @@ def actualiser_travail_par_lot(job_id):
 
 
 def process_uploaded_file(file, filename, mode="rapide"):
-    """Traite un PDF déposé, avec une barre de progression visible."""
+    """Traite un PDF déposé, barre de progression à l'appui.
+
+    Renvoie True si un run a été créé : l'appelant vide alors le dépôt et relance
+    pour repartir sur un formulaire vierge.
+    """
     # Barre pleine largeur, le message d'étape porté par la barre elle-même
     # (st.status laissait un cadre vide et sa barre interne débordait des coins).
     barre = st.progress(0.0, text="⏳ Démarrage du traitement…")
@@ -342,21 +346,28 @@ def process_uploaded_file(file, filename, mode="rapide"):
     except Exception as e:
         barre.empty()
         st.error(f"Erreur lors du traitement : {e}")
-        return
+        return False
 
-    # La barre s'efface ; le bilan (succès, conformité, métriques) prend le relais.
     barre.empty()
 
-    if resultat["run_id"]:
-        st.session_state.last_parsed_data = {
-            'filename': filename,
-            'date': datetime.now().strftime("%d/%m/%Y %H:%M"),
-            'projects': resultat["projects"],
-            'run_id': resultat["run_id"],
-            'document_id': resultat["document_id"],
-            'resultat': resultat,
-        }
-    _afficher_bilan(resultat)
+    if not resultat["run_id"]:
+        # Aucun run créé (document déjà en cours ailleurs) : rien à mémoriser, on
+        # montre l'avertissement ici et on NE vide PAS le dépôt.
+        _afficher_bilan(resultat)
+        return False
+
+    # Le bilan (succès, avertissements, recalages) est rendu par page_traitement
+    # depuis last_parsed_data, PAS ici : la relance qui vide le dépôt juste après
+    # effacerait un rendu en ligne. Les cartes le sont déjà, pour la même raison.
+    st.session_state.last_parsed_data = {
+        'filename': filename,
+        'date': datetime.now().strftime("%d/%m/%Y %H:%M"),
+        'projects': resultat["projects"],
+        'run_id': resultat["run_id"],
+        'document_id': resultat["document_id"],
+        'resultat': resultat,
+    }
+    return True
 
 
 def _afficher_bilan(resultat):
@@ -616,9 +627,15 @@ def display_file_upload():
     """Dépôt d'un PDF, traité en mode rapide."""
     st.markdown("### 📤 Importer un nouveau document PDF")
 
+    # Clé dynamique : après un traitement réussi, `_upload_nonce` est incrémenté et
+    # l'écran relancé, ce qui instancie un file_uploader VIDE. Le dépôt (et le
+    # « Fichier sélectionné : … ») est nettoyé sans que l'usager retire le PDF à la
+    # main, et il peut en déposer un autre aussitôt.
+    cle_depot = f"pdf_uploader_{st.session_state.get('_upload_nonce', 0)}"
     uploaded_file = st.file_uploader(
         "Sélectionnez un fichier PDF",
         type=['pdf'],
+        key=cle_depot,
         help="Glissez-déposez votre fichier PDF ici ou cliquez pour parcourir"
     )
 
@@ -647,7 +664,12 @@ def display_file_upload():
     # les 4 métriques étaient écrasées et désalignées.
     if envoyer:
         st.session_state["_dernier_envoi"] = (sha, MODE_DEFAUT)
-        process_uploaded_file(contenu, uploaded_file.name, mode=MODE_DEFAUT)
+        if process_uploaded_file(contenu, uploaded_file.name, mode=MODE_DEFAUT):
+            # Vide le dépôt (nouvelle clé) puis rafraîchit : le bilan et les
+            # résultats survivent via last_parsed_data, le dépôt repart vierge.
+            nonce = st.session_state.get("_upload_nonce", 0)
+            st.session_state["_upload_nonce"] = nonce + 1
+            st.rerun()
 
 
 # Sections du schéma, dans l'ordre d'apparition dans REX.schema.json.
@@ -1164,6 +1186,13 @@ def _charger_prompts_et_schemas():
 def page_traitement():
     """Écran principal : import du PDF, échecs éventuels, résultats."""
     display_file_upload()
+    # Bilan du dernier traitement, rendu depuis l'état (et non en ligne) : le dépôt
+    # est vidé par une relance juste après le traitement, donc un bilan en ligne
+    # disparaîtrait. Réservé à un run FRAIS — un run rechargé depuis l'historique
+    # pose un `resultat` minimal ({"failures": []}) sans `statut`, qu'on n'affiche pas.
+    resultat = (st.session_state.get("last_parsed_data") or {}).get("resultat") or {}
+    if resultat.get("statut"):
+        _afficher_bilan(resultat)
     display_failures_panel()
     display_results_table()
 

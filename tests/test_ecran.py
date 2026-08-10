@@ -54,3 +54,25 @@ def test_cartes_persistent_sur_run_recharge(db_temporaire, contexte_app):
     assert ">1 234<" in corps, "jetons en entrée = total du run (espace fin insécable)"
     # L'écran de résultats est bien monté, avec une fiche par bouton.
     assert sum(1 for b in at.button if b.label.startswith("📄")) == 2
+
+
+def test_bilan_frais_rendu_depuis_l_etat(db_temporaire, contexte_app):
+    """
+    Le bilan (message de succès + avertissements) est rendu par `page_traitement`
+    DEPUIS l'état, pour survivre à la relance qui vide le dépôt juste après un
+    traitement. Un run rechargé (resultat sans `statut`) ne le déclenche pas — c'est
+    le cas du test précédent, qui pose `{"failures": []}` et ne doit pas planter.
+    """
+    data = _seed_run_recharge(db_temporaire)
+    data["resultat"] = {
+        "statut": "termine", "projects": [1, 2], "failures": [],
+        "avertissements": ["Attention : page 5 rognée."], "conformite": {},
+    }
+    at = AppTest.from_file("app.py", default_timeout=30)
+    at.session_state["last_parsed_data"] = data
+    at.run()
+
+    assert len(at.exception) == 0, at.exception
+    textes = [e.value for e in at.success] + [e.value for e in at.warning]
+    assert any("traité" in t for t in textes), "message de bilan absent"
+    assert any("page 5 rognée" in t for t in textes), "avertissement non persistant"
